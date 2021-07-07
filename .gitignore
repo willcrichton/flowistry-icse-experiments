@@ -1,4 +1,9 @@
 data
+deps
+
 *.pdf
 .cache
 .ipynb_checkpoints
+.env
+*.so
+target

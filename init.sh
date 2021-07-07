@@ -1,5 +1,49 @@
 #!/bin/bash
 
+set -e
+
+bold=`tput bold`
+reset=`tput sgr0`
+
+function msg() {
+    echo "${bold}$1${reset}"
+}
+
+msg "WARNING: this could take up to 1-2 hours to run!"
+
+rustup toolchain install nightly
+
+pushd deps
+
+pushd rust
+pushd src/bootstrap
+msg "Computing build triple"
+BUILD_TRIPLE=$(python3 -c "import bootstrap; print(bootstrap.default_build_triple(False))")
+popd # src/bootstrap
+
+msg "Building Rust"
+./x.py build
+RUSTC_BUILD_DIR=$(pwd)/build/${BUILD_TRIPLE}/stage1
+rustup toolchain link slicer ${RUSTC_BUILD_DIR}
+popd # rust
+
+pushd cargo
+msg "Building Cargo"
+rustup override set nightly
+cargo build --release
+ln -s $(pwd)/target/release/cargo ${RUSTC_BUILD_DIR}/bin/
+popd # cargo
+
+popd # deps
+
+pushd eval
+msg "Building evaluation"
+rustup override set slicer
+cargo install --path . --offline
+popd # eval
+
+exit
+
 # Download dataset
 mkdir -p data/repos
 pushd data/repos
