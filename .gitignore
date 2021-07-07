@@ -1,0 +1,4 @@
+data
+*.pdf
+.cache
+.ipynb_checkpoints
