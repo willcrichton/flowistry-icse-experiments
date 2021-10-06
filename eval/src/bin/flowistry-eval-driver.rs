@@ -2,8 +2,7 @@
 
 extern crate rustc_driver;
 
-use std::env;
-use std::process::exit;
+use std::{env, process::exit};
 
 struct DefaultCallbacks;
 impl rustc_driver::Callbacks for DefaultCallbacks {}

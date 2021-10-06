@@ -17,3 +17,6 @@ itertools = "0.10"
 log = "0.4"
 flowistry = {path = "../../flowistry"}
 fluid-let = {git = "https://github.com/ilammy/fluid-let", rev = "17388c4"}
+
+[profile.release]
+debug = true

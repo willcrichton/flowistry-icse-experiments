@@ -153,8 +153,7 @@ dependencies = [
 [[package]]
 name = "fluid-let"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2622b0e317b2e1ca60d53e51495fbf5c4c9c9c0ac8748319fe7234ae5e16ecd5"
+source = "git+https://github.com/ilammy/fluid-let?rev=17388c4#17388c4f71880ca8152709f310dec321cf79dd9f"
 
 [[package]]
 name = "getrandom"

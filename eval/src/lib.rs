@@ -14,7 +14,7 @@ extern crate rustc_span;
 
 mod visitor;
 
-use std::fs;
+use std::{env, fs};
 
 struct Callbacks {
   output_path: String,
@@ -48,7 +48,7 @@ impl rustc_driver::Callbacks for Callbacks {
 
 pub fn run(args: &[String]) -> Result<(), rustc_errors::ErrorReported> {
   let mut callbacks = Callbacks {
-    output_path: "".into(),
+    output_path: env::var("OUTPUT_PATH").unwrap(),
   };
   rustc_driver::RunCompiler::new(args, &mut callbacks).run()
 }

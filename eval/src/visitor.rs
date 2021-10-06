@@ -1,10 +1,7 @@
 use fluid_let::fluid_set;
 use itertools::iproduct;
-use log::debug;
-use rustc_ast::{
-  token::Token,
-  tokenstream::{TokenStream, TokenTree},
-};
+use log::info;
+use rustc_data_structures::fx::FxHashMap as HashMap;
 use rustc_hir::{
   itemlikevisit::{ItemLikeVisitor, ParItemLikeVisitor},
   BodyId, ImplItemKind, ItemKind,
@@ -19,6 +16,7 @@ use rustc_middle::{
 use rustc_span::{def_id::DefId, Span};
 use std::{
   cell::RefCell,
+  env,
   sync::{
     atomic::{AtomicUsize, Ordering},
     Mutex,
@@ -27,11 +25,9 @@ use std::{
 };
 
 use flowistry::{
-  config::{Config, ContextMode, EvalMode, MutabilityMode, PointerMode, EVAL_MODE},
+  extensions::{ContextMode, EvalMode, MutabilityMode, PointerMode, EVAL_MODE, REACHED_LIBRARY},
   utils, Direction, Range,
 };
-// use rust_slicer::analysis::{eval_extensions::REACHED_LIBRARY, intraprocedural, utils};
-// use rust_slicer::config::{Config, ContextMode, EvalMode, MutabilityMode, PointerMode, Range};
 
 struct EvalBodyVisitor<'a, 'tcx> {
   tcx: TyCtxt<'tcx>,
@@ -131,7 +127,7 @@ pub struct EvalCrateVisitor<'tcx> {
   tcx: TyCtxt<'tcx>,
   count: AtomicUsize,
   total: usize,
-  pub eval_results: Mutex<Vec<Vec<EvalResult>>>,
+  pub eval_results: Mutex<Vec<EvalResult>>,
 }
 
 #[derive(Debug, Encodable)]
@@ -144,24 +140,11 @@ pub struct EvalResult {
   function_path: String,
   num_instructions: usize,
   num_relevant_instructions: usize,
-  num_tokens: usize,
-  num_relevant_tokens: usize,
   duration: f64,
   has_immut_ptr_in_call: bool,
   has_same_type_ptrs_in_call: bool,
   has_same_type_ptrs_in_input: bool,
   reached_library: bool,
-}
-
-fn flatten_stream(stream: TokenStream) -> Vec<Token> {
-  stream
-    .into_trees()
-    .map(|tree| match tree {
-      TokenTree::Token(token) => vec![token].into_iter(),
-      TokenTree::Delimited(_, _, stream) => flatten_stream(stream).into_iter(),
-    })
-    .flatten()
-    .collect()
 }
 
 impl EvalCrateVisitor<'tcx> {
@@ -185,22 +168,22 @@ impl EvalCrateVisitor<'tcx> {
       return;
     }
 
-    let (token_stream, _) =
-      rustc_parse::maybe_file_to_stream(&self.tcx.sess.parse_sess, source_file.clone(), None)
-        .unwrap();
-    let tokens = &flatten_stream(token_stream);
+    let count = self.count.fetch_add(1, Ordering::SeqCst);
+
+    let only_run = env::var("ONLY_RUN");
+    if let Ok(n) = only_run {
+      if count < n.parse::<usize>().unwrap() {
+        return;
+      }
+    }
 
     let local_def_id = self.tcx.hir().body_owner_def_id(*body_id);
     let def_id = local_def_id.to_def_id();
-
     let function_path = &self.tcx.def_path_debug_str(def_id);
-    let count = self.count.fetch_add(1, Ordering::SeqCst);
-
-    debug!("Visiting {} ({} / {})", function_path, count, self.total);
+    info!("Visiting {} ({} / {})", function_path, count, self.total);
 
     let body_with_facts = utils::get_body_with_borrowck_facts(self.tcx, *body_id);
     let body = &body_with_facts.body;
-    let locals = body.local_decls.indices().collect::<Vec<_>>();
 
     let mut body_visitor = EvalBodyVisitor {
       tcx: self.tcx,
@@ -212,82 +195,97 @@ impl EvalCrateVisitor<'tcx> {
     };
     body_visitor.visit_body(body);
 
+    let exits = body
+      .basic_blocks()
+      .iter_enumerated()
+      .filter_map(|(bb, data)| {
+        matches!(data.terminator().kind, TerminatorKind::Return).then(|| body.terminator_loc(bb))
+      })
+      .collect::<Vec<_>>();
+
+    let targets = body
+      .local_decls
+      .indices()
+      .map(|local| {
+        exits
+          .iter()
+          .map(move |exit| (utils::local_to_place(local, self.tcx), *exit))
+      })
+      .flatten()
+      .collect::<Vec<_>>();
+
     let tcx = self.tcx;
     let has_immut_ptr_in_call = body_visitor.has_immut_ptr_in_call;
     let has_same_type_ptrs_in_input = body_visitor.has_same_type_ptrs_in_input;
     let has_same_type_ptrs_in_call = body_visitor.has_same_type_ptrs_in_call;
+
+    let function_range = &match Range::from_span(body_span, source_map) {
+      Ok(range) => range,
+      Err(_) => {
+        return;
+      }
+    };
+
+    let num_instructions = body
+      .basic_blocks()
+      .iter()
+      .map(|data| data.statements.len() + 1)
+      .sum::<usize>();
 
     let eval_results = iproduct!(
       vec![MutabilityMode::DistinguishMut, MutabilityMode::IgnoreMut].into_iter(),
       vec![ContextMode::Recurse, ContextMode::SigOnly].into_iter(),
       vec![PointerMode::Precise, PointerMode::Conservative].into_iter()
     )
-    .map(move |(mutability_mode, context_mode, pointer_mode)| {
-      fluid_set!(
-        EVAL_MODE,
-        &EvalMode {
-          mutability_mode,
-          context_mode,
-          pointer_mode,
-        }
-      );
+    .map(|(mutability_mode, context_mode, pointer_mode)| {
+      let eval_mode = EvalMode {
+        mutability_mode,
+        context_mode,
+        pointer_mode,
+      };
+      fluid_set!(EVAL_MODE, &eval_mode);
+
+      let reached_library = RefCell::new(false);
+      fluid_set!(REACHED_LIBRARY, &reached_library);
 
       let start = Instant::now();
-      let flow = flowistry::compute_flow(tcx, *body_id, &body_with_facts);
-      todo!()
+      let flow = &flowistry::compute_flow(tcx, *body_id, &body_with_facts);
+
+      let deps = flowistry::compute_dependencies(flow, targets.clone(), Direction::Backward);
+      let mut joined_deps = HashMap::default();
+      for ((place, _), (locations, _)) in targets.iter().zip(deps.into_iter()) {
+        joined_deps
+          .entry(place.local.as_usize())
+          .or_insert_with(|| locations.clone())
+          .union(&locations);
+      }
+      let duration = (start.elapsed().as_nanos() as f64) / 10e9;
+
+      joined_deps.into_iter().map(move |(sliced_local, deps)| {
+        EvalResult {
+          // function-level data
+          function_range: function_range.clone(),
+          function_path: function_path.clone(),
+          num_instructions,
+          has_immut_ptr_in_call,
+          has_same_type_ptrs_in_call,
+          has_same_type_ptrs_in_input,
+          //
+          // sample-level parameters
+          context_mode,
+          mutability_mode,
+          pointer_mode,
+          sliced_local,
+          //
+          // sample-level data
+          num_relevant_instructions: deps.len(),
+          duration,
+          reached_library: *reached_library.borrow(),
+        }
+      })
     })
+    .flatten()
     .collect::<Vec<_>>();
-
-    //   // let (output, reached_library) = REACHED_LIBRARY.set(RefCell::new(false), || {
-    //   //   // let output = intraprocedural::analyze_function(
-    //   //   //   &config,
-    //   //   //   tcx,
-    //   //   //   *body_id,
-    //   //   //   &intraprocedural::SliceLocation::PlacesOnExit(vec![Place {
-    //   //   //     local,
-    //   //   //     projection: tcx.intern_place_elems(&[]),
-    //   //   //   }]),
-    //   //   // )
-    //   //   // .unwrap();
-    //   //   // rust_slicer::analysis::intraprocedural::RESULT_CACHE.with(|result_cache| {
-    //   //   //   result_cache.borrow_mut().clear();
-    //   //   // });
-    //   //   // let reached_library =
-    //   //   //   REACHED_LIBRARY.get(|reached_library| *reached_library.unwrap().borrow());
-    //   //   // (output, reached_library)
-    //   //   todo!()
-    //   // });
-
-    //   let num_tokens = tokens.len();
-    //   let slice_spans = output
-    //     .ranges()
-    //     .iter()
-    //     .filter_map(|range| range.to_span(&source_file))
-    //     .collect::<Vec<_>>();
-    //   let num_relevant_tokens = tokens
-    //     .iter()
-    //     .filter(|token| slice_spans.iter().any(|span| span.contains(token.span)))
-    //     .count();
-
-    //   Some(EvalResult {
-    //     context_mode,
-    //     mutability_mode,
-    //     pointer_mode,
-    //     sliced_local: local.as_usize(),
-    //     function_range: Range::from_span(body_span, source_map).ok()?,
-    //     function_path: function_path.clone(),
-    //     num_instructions: output.num_instructions,
-    //     num_relevant_instructions: output.num_relevant_instructions,
-    //     num_tokens,
-    //     num_relevant_tokens,
-    //     duration: (start.elapsed().as_nanos() as f64) / 10e9,
-    //     has_immut_ptr_in_call,
-    //     has_same_type_ptrs_in_call,
-    //     has_same_type_ptrs_in_input,
-    //     reached_library,
-    //   })
-    // })
-    // .collect::<Vec<_>>();
 
     self
       .eval_results
