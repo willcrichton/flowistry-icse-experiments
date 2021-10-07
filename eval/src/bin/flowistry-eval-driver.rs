@@ -28,6 +28,10 @@ fn main() {
     });
 
     if is_driver {
+      args.push(format!(
+        "-Zthreads={}",
+        env::var("THREADS").unwrap_or("1".to_string())
+      ));
       flowistry_eval::run(&args)
     } else {
       rustc_driver::RunCompiler::new(&args, &mut DefaultCallbacks).run()
