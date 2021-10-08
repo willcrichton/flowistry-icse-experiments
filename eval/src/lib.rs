@@ -21,6 +21,10 @@ struct Callbacks {
 }
 
 impl rustc_driver::Callbacks for Callbacks {
+  fn config(&mut self, config: &mut rustc_interface::Config) {
+    config.override_queries = Some(flowistry::override_queries);
+  }
+
   fn after_parsing<'tcx>(
     &mut self,
     _compiler: &rustc_interface::interface::Compiler,

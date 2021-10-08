@@ -182,7 +182,7 @@ impl EvalCrateVisitor<'tcx> {
     let function_path = &self.tcx.def_path_debug_str(def_id);
     info!("Visiting {} ({} / {})", function_path, count, self.total);
 
-    let body_with_facts = utils::get_body_with_borrowck_facts(self.tcx, *body_id);
+    let body_with_facts = flowistry::get_body_with_borrowck_facts(self.tcx, local_def_id);
     let body = &body_with_facts.body;
 
     let mut body_visitor = EvalBodyVisitor {
