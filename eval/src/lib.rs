@@ -32,12 +32,11 @@ impl rustc_driver::Callbacks for Callbacks {
   ) -> rustc_driver::Compilation {
     queries.global_ctxt().unwrap().take().enter(|tcx| {
       let mut counter = visitor::ItemCounter { count: 0, tcx };
-      tcx.hir().krate().visit_all_item_likes(&mut counter);
+      tcx.hir().visit_all_item_likes(&mut counter);
 
       let mut eval_visitor = visitor::EvalCrateVisitor::new(tcx, counter.count);
       tcx
         .hir()
-        .krate()
         .par_visit_all_item_likes(&mut eval_visitor);
 
       let results = eval_visitor.eval_results.lock().unwrap();
