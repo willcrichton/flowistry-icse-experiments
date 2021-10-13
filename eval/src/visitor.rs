@@ -2,10 +2,7 @@ use fluid_let::fluid_set;
 use itertools::iproduct;
 use log::info;
 use rustc_data_structures::fx::FxHashMap as HashMap;
-use rustc_hir::{
-  itemlikevisit::{ItemLikeVisitor, ParItemLikeVisitor},
-  BodyId, ImplItemKind, ItemKind,
-};
+use rustc_hir::{itemlikevisit::ItemLikeVisitor, BodyId, ImplItemKind, ItemKind};
 use rustc_macros::Encodable;
 use rustc_middle::{
   mir::{
@@ -14,15 +11,7 @@ use rustc_middle::{
   ty::{Ty, TyCtxt, TyS},
 };
 use rustc_span::{def_id::DefId, Span};
-use std::{
-  cell::RefCell,
-  env,
-  sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
-  },
-  time::Instant,
-};
+use std::{cell::RefCell, env, time::Instant};
 
 use flowistry::{
   extensions::{ContextMode, EvalMode, MutabilityMode, PointerMode, EVAL_MODE, REACHED_LIBRARY},
@@ -125,9 +114,9 @@ impl Visitor<'tcx> for EvalBodyVisitor<'_, 'tcx> {
 
 pub struct EvalCrateVisitor<'tcx> {
   tcx: TyCtxt<'tcx>,
-  count: AtomicUsize,
+  count: usize,
   total: usize,
-  pub eval_results: Mutex<Vec<EvalResult>>,
+  pub eval_results: Vec<EvalResult>,
 }
 
 #[derive(Debug, Encodable)]
@@ -151,24 +140,28 @@ impl EvalCrateVisitor<'tcx> {
   pub fn new(tcx: TyCtxt<'tcx>, total: usize) -> Self {
     EvalCrateVisitor {
       tcx,
-      count: AtomicUsize::new(1),
+      count: 0,
       total,
-      eval_results: Mutex::new(Vec::new()),
+      eval_results: Vec::new(),
     }
   }
 
-  fn analyze(&self, body_span: Span, body_id: &BodyId) {
+  fn analyze(&mut self, body_span: Span, body_id: &BodyId) {
     if body_span.from_expansion() {
       return;
     }
 
-    let source_map = self.tcx.sess.source_map();
+    let tcx = self.tcx;
+    let source_map = tcx.sess.source_map();
     let source_file = &source_map.lookup_source_file(body_span.lo());
     if source_file.src.is_none() {
       return;
     }
 
-    let count = self.count.fetch_add(1, Ordering::SeqCst);
+    let count = {
+      self.count += 1;
+      self.count
+    };
 
     let only_run = env::var("ONLY_RUN");
     if let Ok(n) = only_run {
@@ -177,16 +170,16 @@ impl EvalCrateVisitor<'tcx> {
       }
     }
 
-    let local_def_id = self.tcx.hir().body_owner_def_id(*body_id);
+    let local_def_id = tcx.hir().body_owner_def_id(*body_id);
     let def_id = local_def_id.to_def_id();
-    let function_path = &self.tcx.def_path_debug_str(def_id);
+    let function_path = &tcx.def_path_debug_str(def_id);
     info!("Visiting {} ({} / {})", function_path, count, self.total);
 
-    let body_with_facts = flowistry::get_body_with_borrowck_facts(self.tcx, local_def_id);
+    let body_with_facts = flowistry::get_body_with_borrowck_facts(tcx, local_def_id);
     let body = &body_with_facts.body;
 
     let mut body_visitor = EvalBodyVisitor {
-      tcx: self.tcx,
+      tcx: tcx,
       body,
       def_id,
       has_immut_ptr_in_call: false,
@@ -209,12 +202,11 @@ impl EvalCrateVisitor<'tcx> {
       .map(|local| {
         exits
           .iter()
-          .map(move |exit| (utils::local_to_place(local, self.tcx), *exit))
+          .map(move |exit| (utils::local_to_place(local, tcx), *exit))
       })
       .flatten()
       .collect::<Vec<_>>();
 
-    let tcx = self.tcx;
     let has_immut_ptr_in_call = body_visitor.has_immut_ptr_in_call;
     let has_same_type_ptrs_in_input = body_visitor.has_same_type_ptrs_in_input;
     let has_same_type_ptrs_in_call = body_visitor.has_same_type_ptrs_in_call;
@@ -259,6 +251,7 @@ impl EvalCrateVisitor<'tcx> {
           .or_insert_with(|| locations.clone())
           .union(&locations);
       }
+
       let duration = (start.elapsed().as_nanos() as f64) / 10e9;
 
       joined_deps.into_iter().map(move |(sliced_local, deps)| {
@@ -289,14 +282,12 @@ impl EvalCrateVisitor<'tcx> {
 
     self
       .eval_results
-      .lock()
-      .unwrap()
-      .extend(eval_results.into_iter());
+      .extend(eval_results);
   }
 }
 
-impl ParItemLikeVisitor<'tcx> for EvalCrateVisitor<'tcx> {
-  fn visit_item(&self, item: &'tcx rustc_hir::Item<'tcx>) {
+impl ItemLikeVisitor<'tcx> for EvalCrateVisitor<'tcx> {
+  fn visit_item(&mut self, item: &'tcx rustc_hir::Item<'tcx>) {
     match &item.kind {
       ItemKind::Fn(_, _, body_id) => {
         self.analyze(item.span, body_id);
@@ -305,7 +296,7 @@ impl ParItemLikeVisitor<'tcx> for EvalCrateVisitor<'tcx> {
     }
   }
 
-  fn visit_impl_item(&self, impl_item: &'tcx rustc_hir::ImplItem<'tcx>) {
+  fn visit_impl_item(&mut self, impl_item: &'tcx rustc_hir::ImplItem<'tcx>) {
     match &impl_item.kind {
       ImplItemKind::Fn(_, body_id) => {
         self.analyze(impl_item.span, body_id);
@@ -314,9 +305,9 @@ impl ParItemLikeVisitor<'tcx> for EvalCrateVisitor<'tcx> {
     }
   }
 
-  fn visit_trait_item(&self, _trait_item: &'tcx rustc_hir::TraitItem<'tcx>) {}
+  fn visit_trait_item(&mut self, _trait_item: &'tcx rustc_hir::TraitItem<'tcx>) {}
 
-  fn visit_foreign_item(&self, _foreign_item: &'tcx rustc_hir::ForeignItem<'tcx>) {}
+  fn visit_foreign_item(&mut self, _foreign_item: &'tcx rustc_hir::ForeignItem<'tcx>) {}
 }
 
 pub struct ItemCounter<'tcx> {

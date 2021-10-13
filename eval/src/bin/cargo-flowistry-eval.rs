@@ -4,7 +4,7 @@ use std::{
 };
 
 fn main() {
-  let toolchain = env::var("TOOLCHAIN").unwrap_or("nightly-2021-09-23".to_string());
+  let toolchain = env::var("TOOLCHAIN").unwrap_or("nightly-2021-108-08".to_string());
   let mut cmd = Command::new("cargo");
   cmd.env("RUSTC_WORKSPACE_WRAPPER", "flowistry-eval-driver");
   cmd.args(&[&format!("+{}", toolchain), "rustc", "--profile", "check"]);

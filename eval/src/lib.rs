@@ -37,10 +37,9 @@ impl rustc_driver::Callbacks for Callbacks {
       let mut eval_visitor = visitor::EvalCrateVisitor::new(tcx, counter.count);
       tcx
         .hir()
-        .par_visit_all_item_likes(&mut eval_visitor);
+        .visit_all_item_likes(&mut eval_visitor);
 
-      let results = eval_visitor.eval_results.lock().unwrap();
-      let json = rustc_serialize::json::encode(&*results).unwrap();
+      let json = rustc_serialize::json::encode(&eval_visitor.eval_results).unwrap();
 
       fs::write(&self.output_path, &json).unwrap();
     });
