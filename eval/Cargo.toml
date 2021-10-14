@@ -15,8 +15,8 @@ clap = "2.33"
 env_logger = "0.8"
 itertools = "0.10"
 log = "0.4"
+fluid-let = "1.0"
 flowistry = {path = "../../flowistry"}
-fluid-let = {git = "https://github.com/ilammy/fluid-let", rev = "17388c4"}
 
 [profile.release]
 debug = true
