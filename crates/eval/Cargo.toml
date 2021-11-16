@@ -1,13 +1,11 @@
 [package]
-authors = ["Anonymous"]
+authors = ["<redacted>"]
 edition = "2018"
 name = "flowistry-eval"
 version = "0.1.0"
 
 [package.metadata.rust-analyzer]
 rustc_private=true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
@@ -16,7 +14,7 @@ env_logger = "0.8"
 itertools = "0.10"
 log = "0.4"
 fluid-let = "1.0"
-flowistry = {path = "../../flowistry"}
+flowistry = {path = "../flowistry"}
 
 [profile.release]
 debug = true

@@ -252,7 +252,7 @@ impl EvalCrateVisitor<'tcx> {
           .union(&locations);
       }
 
-      let duration = (start.elapsed().as_nanos() as f64) / 10e9;
+      let duration = start.elapsed().as_secs_f64();
 
       joined_deps.into_iter().map(move |(sliced_local, deps)| {
         EvalResult {

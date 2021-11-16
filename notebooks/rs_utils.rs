@@ -58,9 +58,9 @@ pub struct EvalResult {
   has_same_type_ptrs_in_input: bool,
   reached_library: bool,
   // added fields
-  instructions_relative: Option<usize>,
+  instructions_relative: Option<f64>,
   instructions_relative_frac: Option<f64>,
-  instructions_relative_base: Option<usize>,
+  instructions_relative_base: Option<f64>,
   instructions_relative_base_frac: Option<f64>,
   baseline_reached_library: Option<bool>,
 }
@@ -95,16 +95,19 @@ fn parse_data(py: Python, path: String) -> PyResult<PyObject> {
       trial
         .into_iter()
         .map(|mut sample| {
-          let frac = |a, b| (a - b) as f64 / (if b == 0 { 1.0 } else { b as f64 });
-          let min_inst = min_sample.num_relevant_instructions;
-          sample.instructions_relative = Some(sample.num_relevant_instructions - min_inst);
+          let min_inst = min_sample.num_relevant_instructions as f64;
+          let base_inst = base_sample.num_relevant_instructions as f64;
+          let rel_inst = sample.num_relevant_instructions as f64;
+
+          let frac = |a: f64, b: f64| (a - b) / b.max(1.);
+
+          sample.instructions_relative = Some(rel_inst - min_inst);
           sample.instructions_relative_frac =
-            Some(frac(sample.num_relevant_instructions, min_inst));
+            Some(frac(rel_inst, min_inst));
           sample.reached_library = min_sample.reached_library;
-          let base_inst = base_sample.num_relevant_instructions;
-          sample.instructions_relative_base = Some(sample.num_relevant_instructions - base_inst);
+          sample.instructions_relative_base = Some(rel_inst - base_inst);
           sample.instructions_relative_base_frac =
-            Some(frac(sample.num_relevant_instructions, base_inst));
+            Some(frac(rel_inst, base_inst));
           sample.baseline_reached_library = Some(min_sample.reached_library);
           sample
         })

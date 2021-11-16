@@ -1,5 +1,7 @@
 data
 deps
+crates/flowistry
+crates/ifc
 
 *.pdf
 .cache
