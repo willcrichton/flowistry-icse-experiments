@@ -11,6 +11,7 @@ function msg() {
 
 # Download dataset
 mkdir -p data/repos
+mkdir -p data/logs
 pushd data/repos
 
 function co() {
@@ -32,10 +33,15 @@ co https://github.com/mozilla/sccache sccache 3f318a8675e4c3de4f5e8ab2d086189f2a
 co https://github.com/RustPython/RustPython RustPython 9143e51b7524a5084d5ed230b1f2f5b0610ac58b
 popd
 
+# Install flowistry
+pushd crates/eval
+cargo install --path .
+popd
+
 # Install native script dependencies
 cargo install cargo-single-pyo3
 pushd notebooks
-cargo single-pyo3 rs_utils.rs --release
+cargo +nightly-2021-10-08 single-pyo3 rs_utils.rs --release
 popd
 
 # Install Python script dependencies (DO IT IN A VIRTUAL ENVIRONMENT!)
