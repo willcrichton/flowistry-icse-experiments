@@ -8,14 +8,19 @@ use rustc_middle::{
   mir::{
     visit::Visitor, Body, HasLocalDecls, Location, Mutability, Place, Terminator, TerminatorKind,
   },
-  ty::{Ty, TyCtxt, TyS},
+  ty::{Ty, TyCtxt},
 };
 use rustc_span::{def_id::DefId, Span};
 use std::{cell::RefCell, env, time::Instant};
 
 use flowistry::{
   extensions::{ContextMode, EvalMode, MutabilityMode, PointerMode, EVAL_MODE, REACHED_LIBRARY},
-  utils, Direction, Range,
+  indexed::IndexSet,
+  mir::{
+    borrowck_facts,
+    utils::{OperandExt, PlaceExt},
+  },
+  range::Range,
 };
 
 struct EvalBodyVisitor<'a, 'tcx> {
@@ -40,7 +45,7 @@ impl EvalBodyVisitor<'_, 'tcx> {
         .iter()
         .enumerate()
         .filter(|(j, _)| i != *j)
-        .any(|(_, place2)| TyS::same_type(self.place_ty(*place), self.place_ty(*place2)))
+        .any(|(_, place2)| self.place_ty(*place) == self.place_ty(*place2))
     })
   }
 }
@@ -51,14 +56,13 @@ impl Visitor<'tcx> for EvalBodyVisitor<'_, 'tcx> {
 
     let input_ptrs = body
       .args_iter()
-      .map(|local| {
-        let place = utils::local_to_place(local, self.tcx);
-        utils::interior_pointers(place, self.tcx, self.body, self.def_id)
+      .flat_map(|local| {
+        let place = Place::from_local(local, self.tcx);
+        place
+          .interior_pointers(self.tcx, self.body, self.def_id)
           .into_values()
-          .map(|v| v.into_iter())
-          .flatten()
+          .flat_map(|v| v.into_iter())
       })
-      .flatten()
       .filter_map(|(place, mutability)| (mutability == Mutability::Mut).then(|| place))
       .collect::<Vec<_>>();
 
@@ -73,22 +77,22 @@ impl Visitor<'tcx> for EvalBodyVisitor<'_, 'tcx> {
     {
       let input_ptrs = args
         .iter()
-        .filter_map(|operand| utils::operand_to_place(operand))
+        .filter_map(|operand| operand.to_place())
         .map(|place| {
-          utils::interior_pointers(place, self.tcx, self.body, self.def_id)
+          place
+            .interior_pointers(self.tcx, self.body, self.def_id)
             .into_values()
-            .map(|v| v.into_iter())
-            .flatten()
+            .flat_map(|v| v.into_iter())
         })
         .flatten()
         .collect::<Vec<_>>();
 
       let output_ptrs = destination
         .map(|(place, _)| {
-          utils::interior_pointers(place, self.tcx, self.body, self.def_id)
+          place
+            .interior_pointers(self.tcx, self.body, self.def_id)
             .into_values()
-            .map(|v| v.into_iter())
-            .flatten()
+            .flat_map(|v| v.into_iter())
             .collect::<Vec<_>>()
         })
         .unwrap_or_else(Vec::new);
@@ -175,7 +179,7 @@ impl EvalCrateVisitor<'tcx> {
     let function_path = &tcx.def_path_debug_str(def_id);
     info!("Visiting {} ({} / {})", function_path, count, self.total);
 
-    let body_with_facts = flowistry::get_body_with_borrowck_facts(tcx, local_def_id);
+    let body_with_facts = borrowck_facts::get_body_with_borrowck_facts(tcx, local_def_id);
     let body = &body_with_facts.body;
 
     let mut body_visitor = EvalBodyVisitor {
@@ -202,7 +206,7 @@ impl EvalCrateVisitor<'tcx> {
       .map(|local| {
         exits
           .iter()
-          .map(move |exit| (utils::local_to_place(local, tcx), *exit))
+          .map(move |exit| (Place::from_local(local, tcx), *exit))
       })
       .flatten()
       .collect::<Vec<_>>();
@@ -241,15 +245,17 @@ impl EvalCrateVisitor<'tcx> {
       fluid_set!(REACHED_LIBRARY, &reached_library);
 
       let start = Instant::now();
-      let flow = &flowistry::compute_flow(tcx, *body_id, &body_with_facts);
+      let flow = &flowistry::infoflow::compute_flow(tcx, *body_id, &body_with_facts);
 
-      let deps = flowistry::compute_dependencies(flow, targets.clone(), Direction::Backward);
       let mut joined_deps = HashMap::default();
-      for ((place, _), (locations, _)) in targets.iter().zip(deps.into_iter()) {
-        joined_deps
+      for (place, location) in targets.iter() {
+        let state = flow.state_at(*location);
+        let entry = joined_deps
           .entry(place.local.as_usize())
-          .or_insert_with(|| locations.clone())
-          .union(&locations);
+          .or_insert_with(|| IndexSet::new(flow.analysis.location_domain()));
+        for reachable in flow.analysis.aliases.reachable_values(*place) {
+          entry.union(&state.row_set(*reachable));
+        }
       }
 
       let duration = start.elapsed().as_secs_f64();
@@ -280,9 +286,7 @@ impl EvalCrateVisitor<'tcx> {
     .flatten()
     .collect::<Vec<_>>();
 
-    self
-      .eval_results
-      .extend(eval_results);
+    self.eval_results.extend(eval_results);
   }
 }
 

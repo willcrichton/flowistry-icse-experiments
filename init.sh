@@ -2,13 +2,6 @@
 
 set -e
 
-bold=`tput bold`
-reset=`tput sgr0`
-
-function msg() {
-    echo "${bold}$1${reset}"
-}
-
 # Download dataset
 mkdir -p data/repos
 mkdir -p data/logs
@@ -41,7 +34,7 @@ popd
 # Install native script dependencies
 cargo install cargo-single-pyo3
 pushd notebooks
-cargo +nightly-2021-10-08 single-pyo3 rs_utils.rs --release
+cargo single-pyo3 rs_utils.rs --release
 popd
 
 # Install Python script dependencies (DO IT IN A VIRTUAL ENVIRONMENT!)

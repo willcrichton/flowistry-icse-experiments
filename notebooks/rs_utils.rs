@@ -1,48 +1,44 @@
 // serde_json = "1.0"
 // serde = {version = "1.0", features = ["derive"]}
-// pythonize = "0.14"
+// pythonize = "0.15"
 // rayon = "1.5"
 // itertools = "0.10"
-#![feature(rustc_private)]
-
-extern crate rustc_macros;
-extern crate rustc_serialize;
 
 use itertools::Itertools;
 use pyo3::prelude::*;
 use pyo3::{exceptions::PyException, wrap_pyfunction};
 use rayon::prelude::*;
-use rustc_macros::Decodable;
-use rustc_serialize::json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 
-#[derive(Serialize, Decodable, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Range {
-  pub start: usize,
-  pub end: usize,
+  pub char_start: usize,
+  pub char_end: usize,
+  pub byte_start: usize,
+  pub byte_end: usize,
   pub filename: String,
 }
 
-#[derive(Serialize, Decodable, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum MutabilityMode {
   DistinguishMut,
   IgnoreMut,
 }
 
-#[derive(Serialize, Decodable, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum ContextMode {
   SigOnly,
   Recurse,
 }
 
-#[derive(Serialize, Decodable, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum PointerMode {
   Precise,
   Conservative,
 }
 
-#[derive(Serialize, Decodable, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EvalResult {
   mutability_mode: MutabilityMode,
   context_mode: ContextMode,
@@ -68,7 +64,8 @@ pub struct EvalResult {
 #[pyfunction]
 fn parse_data(py: Python, path: String) -> PyResult<PyObject> {
   let contents = String::from_utf8(fs::read(&path)?)?;
-  let data: Vec<EvalResult> = json::decode(&contents).map_err(|err| PyException::new_err(format!("{}", err)))?;
+  let data: Vec<EvalResult> =
+    serde_json::from_str(&contents).map_err(|err| PyException::new_err(format!("{}", err)))?;
   let mut trials = data
     .into_iter()
     .into_group_map_by(|sample| (sample.function_path.clone(), sample.sliced_local))
@@ -102,12 +99,10 @@ fn parse_data(py: Python, path: String) -> PyResult<PyObject> {
           let frac = |a: f64, b: f64| (a - b) / b.max(1.);
 
           sample.instructions_relative = Some(rel_inst - min_inst);
-          sample.instructions_relative_frac =
-            Some(frac(rel_inst, min_inst));
+          sample.instructions_relative_frac = Some(frac(rel_inst, min_inst));
           sample.reached_library = min_sample.reached_library;
           sample.instructions_relative_base = Some(rel_inst - base_inst);
-          sample.instructions_relative_base_frac =
-            Some(frac(rel_inst, base_inst));
+          sample.instructions_relative_base_frac = Some(frac(rel_inst, base_inst));
           sample.baseline_reached_library = Some(min_sample.reached_library);
           sample
         })

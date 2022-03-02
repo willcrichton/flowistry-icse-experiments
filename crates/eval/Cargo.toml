@@ -14,7 +14,7 @@ env_logger = "0.8"
 itertools = "0.10"
 log = "0.4"
 fluid-let = "1.0"
-flowistry = {path = "../flowistry"}
+flowistry = {path = "../flowistry/crates/flowistry"}
 
 [profile.release]
 debug = true

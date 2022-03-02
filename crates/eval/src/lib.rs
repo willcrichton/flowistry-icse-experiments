@@ -14,6 +14,7 @@ extern crate rustc_span;
 
 mod visitor;
 
+use flowistry::mir::borrowck_facts;
 use std::{env, fs};
 
 struct Callbacks {
@@ -22,7 +23,8 @@ struct Callbacks {
 
 impl rustc_driver::Callbacks for Callbacks {
   fn config(&mut self, config: &mut rustc_interface::Config) {
-    config.override_queries = Some(flowistry::override_queries);
+    // You MUST configure rustc to ensure `get_body_with_borrowck_facts` will work.
+    config.override_queries = Some(borrowck_facts::override_queries);
   }
 
   fn after_parsing<'tcx>(
@@ -35,9 +37,7 @@ impl rustc_driver::Callbacks for Callbacks {
       tcx.hir().visit_all_item_likes(&mut counter);
 
       let mut eval_visitor = visitor::EvalCrateVisitor::new(tcx, counter.count);
-      tcx
-        .hir()
-        .visit_all_item_likes(&mut eval_visitor);
+      tcx.hir().visit_all_item_likes(&mut eval_visitor);
 
       let json = rustc_serialize::json::encode(&eval_visitor.eval_results).unwrap();
 
