@@ -1,4 +1,4 @@
-statmodels
+statsmodels
 jupyter
 pandas
 matplotlib
