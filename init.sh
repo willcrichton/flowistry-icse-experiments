@@ -25,17 +25,3 @@ co https://github.com/ctz/rustls rustls cdf1dada21a537e141d0c6dde9c5685bb43fbc0e
 co https://github.com/mozilla/sccache sccache 3f318a8675e4c3de4f5e8ab2d086189f2ae5f5cf &&
 co https://github.com/RustPython/RustPython RustPython 9143e51b7524a5084d5ed230b1f2f5b0610ac58b
 popd
-
-# Install flowistry
-pushd crates/eval
-cargo install --path .
-popd
-
-# Install native script dependencies
-cargo install cargo-single-pyo3
-pushd notebooks
-cargo single-pyo3 rs_utils.rs --release
-popd
-
-# Install Python script dependencies (DO IT IN A VIRTUAL ENVIRONMENT!)
-pip3 install -r requirements.txt

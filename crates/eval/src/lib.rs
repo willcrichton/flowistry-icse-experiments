@@ -1,5 +1,6 @@
-#![feature(rustc_private, in_band_lifetimes)]
+#![feature(rustc_private, in_band_lifetimes, box_patterns)]
 
+extern crate either;
 extern crate rustc_ast;
 extern crate rustc_data_structures;
 extern crate rustc_driver;

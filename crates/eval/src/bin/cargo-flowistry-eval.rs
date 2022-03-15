@@ -7,7 +7,13 @@ fn main() {
   let toolchain = env::var("TOOLCHAIN").unwrap_or("nightly-2021-108-08".to_string());
   let mut cmd = Command::new("cargo");
   cmd.env("RUSTC_WORKSPACE_WRAPPER", "flowistry-eval-driver");
-  cmd.args(&[&format!("+{}", toolchain), "rustc", "--profile", "check"]);
+  cmd.args(&[
+    &format!("+{}", toolchain),
+    "rustc",
+    "--profile",
+    "check",
+    "--locked",
+  ]);
   cmd.args(&env::args().skip(2).collect::<Vec<_>>());
   cmd.args(&["--", "--flowistry-eval"]);
 
