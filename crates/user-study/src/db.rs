@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub enum Field {
@@ -19,22 +19,21 @@ impl Row {
 
 #[derive(Default)]
 struct Index {
-  index: HashMap<Field, HashSet<usize>>,
+  index: HashMap<Field, Vec<usize>>,
 }
 
 impl Index {
   pub fn update(&mut self, field: Field, row_index: usize) {
-    self.index.insert(field, maplit::hashset! { row_index });
+    self.index.insert(field, vec![row_index]);
   }
 
-  pub fn lookup(&self, field: &Field) -> Option<&HashSet<usize>> {
+  pub fn lookup(&self, field: &Field) -> Option<&Vec<usize>> {
     self.index.get(field)
   }
 }
 
 pub struct Database {
-  columns: Vec<String>,
-  col_indexes: HashMap<String, usize>,
+  col_to_idx: HashMap<String, usize>,
   indexes: HashMap<String, Index>,
   rows: Vec<Row>,
 }
@@ -45,64 +44,59 @@ impl Database {
       .into_iter()
       .map(|col| (col, Index::default()))
       .collect::<HashMap<_, _>>();
-    let col_indexes = columns
-      .iter()
+
+    let col_to_idx = columns
+      .into_iter()
       .enumerate()
-      .map(|(i, s)| (s.clone(), i))
+      .map(|(i, s)| (s, i))
       .collect::<HashMap<_, _>>();
+
     Database {
-      columns,
       indexes,
-      col_indexes,
+      col_to_idx,
       rows: Vec::new(),
     }
   }
 
   pub fn insert(&mut self, row: Row) {
     let row_index = self.rows.len();
+
     for (col, index) in self.indexes.iter_mut() {
-      let field = &row.fields[self.col_indexes[col]];
+      let field = &row.fields[self.col_to_idx[col]];
       index.update(field.clone(), row_index);
     }
+
     self.rows.push(row);
   }
 
-  pub fn select(&self, filter: &[(&str, &Field)]) -> Vec<&Row> {
-    let mut matching = (0..self.rows.len()).collect::<HashSet<_>>();
-
-    for (key, field) in filter {
-      match self.indexes.get(*key) {
-        Some(index) => match index.lookup(field) {
-          Some(index_matching) => {
-            matching = &matching & index_matching;
-          }
-          None => {
-            return Vec::new();
-          }
-        },
-
-        None => {
-          let col_idx = self.col_indexes[*key];
-          matching.retain(|row_idx| {
-            let row = &self.rows[*row_idx];
-            &row.fields[col_idx] == *field
-          });
-        }
-      }
+  pub fn select(&self, key: &str, field: &Field) -> Vec<&Row> {
+    if !self.col_to_idx.contains_key(key) {
+      panic!("Invalid column {key:?}");
     }
 
-    let mut matching = Vec::from_iter(matching);
-    matching.sort();
-    matching.into_iter().map(|i| &self.rows[i]).collect()
+    match self.indexes.get(key) {
+      Some(index) => match index.lookup(field) {
+        Some(index_matching) => index_matching.iter().map(|i| &self.rows[*i]).collect(),
+        None => Vec::new(),
+      },
+      None => {
+        let col_idx = self.col_to_idx[key];
+        self
+          .rows
+          .iter()
+          .filter(|row| &row.fields[col_idx] == field)
+          .collect::<Vec<_>>()
+      }
+    }
   }
 }
 
 #[test]
 fn db_test1() {
-  let mut db = Database::new(vec!["id".into(), "name".into()], vec!["id".into()]);
+  let mut db = Database::new(vec!["id".into(), "name".into()], vec![]);
   let row = Row::new(vec![Field::Integer(0), Field::String("will".into())]);
   db.insert(row.clone());
-  assert_eq!(vec![&row], db.select(&[("id", &Field::Integer(0))]));
+  assert_eq!(vec![&row], db.select("id", &Field::Integer(0)));
 }
 
 #[test]
@@ -117,6 +111,6 @@ fn db_test2() {
   }
   assert_eq!(
     vec![&rows[0], &rows[3]],
-    db.select(&[("name", &Field::String("will".into()))])
+    db.select("name", &Field::String("will".into()))
   );
 }

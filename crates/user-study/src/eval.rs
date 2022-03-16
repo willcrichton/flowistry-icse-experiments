@@ -173,45 +173,50 @@ impl Expr {
   }
 }
 
-fn num(n: isize) -> Box<Expr> {
-  Box::new(Expr::Const(Const::Num(n)))
-}
+#[cfg(test)]
+mod test {
+  use super::*;
 
-#[test]
-fn eval_test1() {
-  let e = Expr::Relop(
-    Relop::And,
-    Box::new(Expr::Const(Const::Bool(true))),
-    Box::new(Expr::Const(Const::Bool(false))),
-  );
-  assert_eq!(Const::Bool(false), e.eval(&mut State::default()));
-}
+  fn num(n: isize) -> Box<Expr> {
+    Box::new(Expr::Const(Const::Num(n)))
+  }
 
-#[test]
-fn eval_test2() {
-  let e = Expr::Let(
-    "x".into(),
-    num(1),
-    Box::new(Expr::Binop(
-      Binop::Add,
-      Box::new(Expr::Var("x".into())),
-      num(2),
-    )),
-  );
-  assert_eq!(Const::Num(3), e.eval(&mut State::default()));
-}
+  #[test]
+  fn eval_test1() {
+    let e = Expr::Relop(
+      Relop::And,
+      Box::new(Expr::Const(Const::Bool(true))),
+      Box::new(Expr::Const(Const::Bool(false))),
+    );
+    assert_eq!(Const::Bool(false), e.eval(&mut State::default()));
+  }
 
-#[test]
-fn eval_test3() {
-  let x = "x".to_string();
-  let e = Expr::Let(
-    x.clone(),
-    num(0),
-    Box::new(Expr::Binop(
-      Binop::Add,
-      Box::new(Expr::Let(x.clone(), num(1), Box::new(Expr::Var(x.clone())))),
-      Box::new(Expr::Var(x.clone())),
-    )),
-  );
-  assert_eq!(Const::Num(1), e.eval(&mut State::default()));
+  #[test]
+  fn eval_test2() {
+    let e = Expr::Let(
+      "x".into(),
+      num(1),
+      Box::new(Expr::Binop(
+        Binop::Add,
+        Box::new(Expr::Var("x".into())),
+        num(2),
+      )),
+    );
+    assert_eq!(Const::Num(3), e.eval(&mut State::default()));
+  }
+
+  #[test]
+  fn eval_test3() {
+    let x = "x".to_string();
+    let e = Expr::Let(
+      x.clone(),
+      num(0),
+      Box::new(Expr::Binop(
+        Binop::Add,
+        Box::new(Expr::Let(x.clone(), num(1), Box::new(Expr::Var(x.clone())))),
+        Box::new(Expr::Var(x.clone())),
+      )),
+    );
+    assert_eq!(Const::Num(1), e.eval(&mut State::default()));
+  }
 }
