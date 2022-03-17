@@ -10,8 +10,8 @@ pub struct Country {
   exports: Vec<String>,
 }
 
-/// Gets the median population of countries in each continent that contain the given
-/// export.
+/// For each continent, and for countries that have the given export,
+/// returns the median population and name of countries at the median.
 pub fn median_population(
   mut countries: &[Country],
   export: String,
