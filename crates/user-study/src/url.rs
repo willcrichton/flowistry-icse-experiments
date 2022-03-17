@@ -8,10 +8,21 @@ pub struct Url {
   pub query: Option<String>,
 }
 
+/// Parses a URL string into its components. For example:
+///
+/// https://github.com:80/willcrichton/flowistry?nocache
+///    ^      ^    ^   ^       ^           ^       ^
+///    |      |    |   |       |           |       |
+///    |      |   tld  |       |           |     query
+/// scheme  hostname  port   path[0]     path[1]
+///
+/// Only handles these URL components, and not eg: subdomains, usernames, so on.
 pub fn decode_url(url: &str) -> Option<Url> {
   let chars = &mut url.chars();
 
   let scheme = if url.contains("://") {
+    // note: take_while also consumes the iterator element where the predicate is false,
+    // so the first ':' will be removed from `chars`
     let scheme = chars.take_while(|c| *c != ':').collect::<String>();
     if chars.take(2).collect::<String>() != "//" {
       return None;
@@ -29,7 +40,7 @@ pub fn decode_url(url: &str) -> Option<Url> {
     return None;
   }
 
-  let mut domain_parts = domain.split(".");
+  let mut domain_parts = domain.split('.');
   let hostname = domain_parts.next().unwrap().to_string();
   let tld = domain_parts.next().map(|s| s.to_string());
 
@@ -50,9 +61,9 @@ pub fn decode_url(url: &str) -> Option<Url> {
     }
   }
 
-  let query = if path.last().map(|part| part.contains("?")).unwrap_or(false) {
+  let query = if path.last().map(|part| part.contains('?')).unwrap_or(false) {
     let page = path.pop().unwrap();
-    let mut page_parts = page.split("?");
+    let mut page_parts = page.split('?');
     page_parts.next().map(|query| query.to_string())
   } else {
     None

@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::mem;
 
+/// Bump allocator that starts with a fixed capacity and
+/// allocates pointers until the capacity is exhausted.
 pub struct Allocator(RefCell<AllocatorInner>);
 struct AllocatorInner {
   memory: Vec<u8>,
@@ -8,16 +10,18 @@ struct AllocatorInner {
 }
 
 impl AllocatorInner {
+  /// Get the next index in `memory` that satisfies alignment for `T`.
   fn next_aligned<T>(&self) -> usize {
     let align = mem::align_of::<T>();
     (self.index + align - 1) / align * align
   }
 
+  /// Manufactures a pointer at `index` and bumps to the next free space.
   unsafe fn get_and_bump<'a, 'b, T>(&'a mut self, index: usize) -> &'b mut T {
     let size = mem::size_of::<T>();
     let ptr = self.memory.as_mut_ptr().add(index);
     self.index = index + size;
-    mem::transmute::<*mut u8, &'b mut T>(ptr)
+    &mut *(ptr as *mut T)
   }
 }
 
@@ -29,6 +33,7 @@ impl Allocator {
     }))
   }
 
+  /// Allocates a pointer for T, returning None if not enough space is left.
   pub fn allocate<T>(&self, aligned: bool) -> Option<&mut T> {
     let mut inner = self.0.borrow_mut();
     let next = if aligned {

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+/// Primitive data types of the database.
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub enum Field {
   String(String),
@@ -17,16 +18,20 @@ impl Row {
   }
 }
 
+/// Data structure for efficiently finding which rows contain
+/// a particular column value.
 #[derive(Default)]
 struct Index {
   index: HashMap<Field, Vec<usize>>,
 }
 
 impl Index {
+  /// Updates the index after a new row is added to the database.
   pub fn update(&mut self, field: Field, row_index: usize) {
     self.index.insert(field, vec![row_index]);
   }
 
+  /// Returns the indexes of rows that have the given field.
   pub fn lookup(&self, field: &Field) -> Option<&Vec<usize>> {
     self.index.get(field)
   }
@@ -39,6 +44,9 @@ pub struct Database {
 }
 
 impl Database {
+  /// Creates a new database. `columns` is a list of names of columns,
+  /// and `indexed` is a list of column names that the database should
+  /// build indexes for.
   pub fn new(columns: Vec<String>, indexed: Vec<String>) -> Self {
     let indexes = indexed
       .into_iter()
@@ -58,6 +66,7 @@ impl Database {
     }
   }
 
+  /// Inserts a row into the database, updating indexes as necessary.
   pub fn insert(&mut self, row: Row) {
     let row_index = self.rows.len();
 
@@ -69,18 +78,20 @@ impl Database {
     self.rows.push(row);
   }
 
-  pub fn select(&self, key: &str, field: &Field) -> Vec<&Row> {
-    if !self.col_to_idx.contains_key(key) {
-      panic!("Invalid column {key:?}");
+  /// Finds the rows in the database whose `column` is equal to `field`.
+  pub fn select(&self, column: &str, field: &Field) -> Vec<&Row> {
+    if !self.col_to_idx.contains_key(column) {
+      panic!("Invalid column: {column:?}");
     }
 
-    match self.indexes.get(key) {
+    match self.indexes.get(column) {
       Some(index) => match index.lookup(field) {
         Some(index_matching) => index_matching.iter().map(|i| &self.rows[*i]).collect(),
         None => Vec::new(),
       },
+
       None => {
-        let col_idx = self.col_to_idx[key];
+        let col_idx = self.col_to_idx[column];
         self
           .rows
           .iter()

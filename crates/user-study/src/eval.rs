@@ -181,13 +181,17 @@ mod test {
     Box::new(Expr::Const(Const::Num(n)))
   }
 
+  fn bool(b: bool) -> Box<Expr> {
+    Box::new(Expr::Const(Const::Bool(b)))
+  }
+
+  fn var(x: &str) -> Box<Expr> {
+    Box::new(Expr::Var(x.to_string()))
+  }
+
   #[test]
   fn eval_test1() {
-    let e = Expr::Relop(
-      Relop::And,
-      Box::new(Expr::Const(Const::Bool(true))),
-      Box::new(Expr::Const(Const::Bool(false))),
-    );
+    let e = Expr::Relop(Relop::And, bool(true), bool(false));
     assert_eq!(Const::Bool(false), e.eval(&mut State::default()));
   }
 
@@ -196,11 +200,7 @@ mod test {
     let e = Expr::Let(
       "x".into(),
       num(1),
-      Box::new(Expr::Binop(
-        Binop::Add,
-        Box::new(Expr::Var("x".into())),
-        num(2),
-      )),
+      Box::new(Expr::Binop(Binop::Add, var("x"), num(2))),
     );
     assert_eq!(Const::Num(3), e.eval(&mut State::default()));
   }
@@ -213,8 +213,8 @@ mod test {
       num(0),
       Box::new(Expr::Binop(
         Binop::Add,
-        Box::new(Expr::Let(x.clone(), num(1), Box::new(Expr::Var(x.clone())))),
-        Box::new(Expr::Var(x.clone())),
+        Box::new(Expr::Let(x.clone(), num(1), var(&x))),
+        var(&x),
       )),
     );
     assert_eq!(Const::Num(1), e.eval(&mut State::default()));
