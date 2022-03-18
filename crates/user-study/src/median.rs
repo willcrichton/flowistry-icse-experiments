@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+#[derive(Debug)]
 pub struct Country {
   name: String,
   continent: String,

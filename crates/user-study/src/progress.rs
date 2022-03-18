@@ -16,7 +16,7 @@ where
       index: 0,
       iter,
       bound,
-      brackets: None,
+      brackets: Some(('[', ']')),
     }
   }
 }

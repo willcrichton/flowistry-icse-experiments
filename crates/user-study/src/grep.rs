@@ -36,6 +36,10 @@ pub fn grep(path: impl AsRef<Path>, query: &str) -> Vec<String> {
   // like the fact that `add_arg` is a closure with a mutable reference to `p`.
   // Additionally, `add_arg("-r")` only executes if `should_recurse` is true, so
   // `should_recurse` is highlighted as well.
+  //
+  // Also, notice that clicking on `p` here is different than clicking `p` on line 14.
+  // In one case, you see the *forward* influence *of* p, and in the other case you
+  // see the *backward* influence *on* p.
   println!("Executing grep");
   let result = p.output().unwrap();
   assert!(
