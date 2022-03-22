@@ -1,6 +1,12 @@
+//! This file explains how Flowistry works. Please read the comments from top-to-bottom, and
+//! use Flowistry as directed.
+
 use std::{path::Path, process::Command};
 
 // Click on each argument to see the influence of that argument on the function.
+// Notice that the focused object is dark gray, and direct references or mutations to that
+// object are light gray.
+//
 // Then click on the return type to see what influences the return values of this function.
 pub fn grep(path: impl AsRef<Path>, query: &str) -> Vec<String> {
   let path = path.as_ref().canonicalize().unwrap();

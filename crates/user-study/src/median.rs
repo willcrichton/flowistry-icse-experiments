@@ -1,7 +1,7 @@
-use anyhow::Result;
+
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
+
+
 
 #[derive(Debug)]
 pub struct Country {
@@ -14,7 +14,7 @@ pub struct Country {
 /// For each continent, and for countries that have the given export,
 /// returns the median population and name of countries at the median.
 pub fn median_population(
-  mut countries: &[Country],
+  countries: &[Country],
   export: String,
 ) -> HashMap<String, (HashSet<String>, usize)> {
   let mut continents: HashMap<&str, Vec<_>> = HashMap::new();
