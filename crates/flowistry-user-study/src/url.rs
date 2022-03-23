@@ -1,3 +1,5 @@
+//! A function for parsing URLs. See the doc comment below for details.
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Url {
   pub scheme: Option<String>,

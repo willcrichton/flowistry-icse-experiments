@@ -1,3 +1,5 @@
+//! A tabular data processing program. See the doc comment for details.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug)]

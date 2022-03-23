@@ -1,4 +1,5 @@
-/// Iterator wrapper that prints out a progress bar.
+//! Iterator wrapper that prints out a progress bar.
+
 pub struct ProgressBar<Iter> {
   index: usize,
   iter: Iter,
@@ -10,6 +11,7 @@ impl<Iter> ProgressBar<Iter>
 where
   Iter: ExactSizeIterator,
 {
+  /// Create a progress bar for bounded iterators.
   pub fn new(iter: Iter) -> Self {
     let bound = Some(iter.len());
     ProgressBar {
@@ -22,6 +24,7 @@ where
 }
 
 impl<Iter> ProgressBar<Iter> {
+  /// Create a progress bar for unbounded iterators.
   pub fn new_unbounded(iter: Iter) -> Self {
     ProgressBar {
       index: 0,
@@ -36,6 +39,7 @@ impl<Iter> ProgressBar<Iter> {
   }
 }
 
+// Core logic for printing out the progress bar.
 impl<Iter> Iterator for ProgressBar<Iter>
 where
   Iter: Iterator,
