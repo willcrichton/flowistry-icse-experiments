@@ -22,6 +22,15 @@ where
 }
 
 impl<Iter> ProgressBar<Iter> {
+  pub fn new_unbounded(iter: Iter) -> Self {
+    ProgressBar {
+      index: 0,
+      iter,
+      bound: None,
+      brackets: None,
+    }
+  }
+
   fn bump(&mut self) {
     self.index += 1;
   }
@@ -71,5 +80,10 @@ where
 
 #[test]
 fn progress_test1() {
+  for _ in ProgressBar::new_unbounded(0..).take(3) {}
+}
+
+#[test]
+fn progress_test2() {
   for _ in ProgressBar::new(vec![1, 2, 3].into_iter()) {}
 }

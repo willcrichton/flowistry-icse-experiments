@@ -1,7 +1,4 @@
-
-use std::collections::{HashMap, HashSet};
-
-
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug)]
 pub struct Country {
@@ -13,11 +10,14 @@ pub struct Country {
 
 /// For each continent, and for countries that have the given export,
 /// returns the median population and name of countries at the median.
+///
+/// For an odd number of elements, the median is the middle value.
+/// For an even number of elements, the median is the average of the two middle values.
 pub fn median_population(
   countries: &[Country],
   export: String,
-) -> HashMap<String, (HashSet<String>, usize)> {
-  let mut continents: HashMap<&str, Vec<_>> = HashMap::new();
+) -> BTreeMap<String, (BTreeSet<String>, usize)> {
+  let mut continents: BTreeMap<&str, Vec<_>> = BTreeMap::new();
   for country in countries {
     if country.exports.contains(&export) {
       continents
@@ -27,7 +27,7 @@ pub fn median_population(
     }
   }
 
-  let mut medians = HashMap::new();
+  let mut medians = BTreeMap::new();
   for (continent, cont_countries) in continents.iter_mut() {
     cont_countries.sort_by_key(|c| c.population);
     let n = cont_countries.len();
@@ -40,7 +40,7 @@ pub fn median_population(
     let names = median_countries
       .iter()
       .map(|c| c.name.to_string())
-      .collect::<HashSet<_>>();
+      .collect::<BTreeSet<_>>();
 
     let pop_total = median_countries.iter().map(|c| c.population).sum::<usize>();
     let median = pop_total / cont_countries.len();
@@ -53,7 +53,7 @@ pub fn median_population(
 
 #[test]
 fn median_test1() {
-  use maplit::{hashmap, hashset};
+  use maplit::{btreemap, btreeset};
 
   let s = |s: &str| -> String { s.to_string() };
   let countries = &[
@@ -61,7 +61,7 @@ fn median_test1() {
       name: s("USA"),
       population: 328,
       continent: s("North America"),
-      exports: vec![s("wheat"), s("cheese")],
+      exports: vec![s("cheese"), s("wheat")],
     },
     Country {
       name: s("Canada"),
@@ -82,17 +82,23 @@ fn median_test1() {
       exports: vec![s("coffee"), s("bananas")],
     },
     Country {
-      name: s("Ethiopia"),
-      population: 109,
+      name: s("Tanzania"),
+      population: 59,
       continent: s("Africa"),
-      exports: vec![s("coffee"), s("wheat")],
+      exports: vec![s("gold"), s("wheat")],
+    },
+    Country {
+      name: s("Liberia"),
+      population: 5,
+      continent: s("Africa"),
+      exports: vec![s("rubber"), s("wheat")],
     },
   ];
 
   assert_eq!(
-    hashmap! {
-      s("North America") => (hashset![s("Mexico")], 128),
-      s("Africa") => (hashset![s("Ethiopia")], 109)
+    btreemap! {
+      s("North America") => (btreeset![s("Mexico")], 128),
+      s("Africa") => (btreeset![s("Liberia"), s("Tanzania")], 32)
     },
     median_population(countries, s("wheat"))
   );

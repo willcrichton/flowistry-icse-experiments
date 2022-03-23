@@ -61,12 +61,13 @@ pub fn decode_url(url: &str) -> Option<Url> {
     }
   }
 
-  let query = if path.last().map(|part| part.contains('?')).unwrap_or(false) {
-    let page = path.pop().unwrap();
-    let mut page_parts = page.split('?');
-    page_parts.next().map(|query| query.to_string())
-  } else {
-    None
+  let query = match path.last() {
+    Some(part) if part.contains('?') => {
+      let page = path.pop().unwrap();
+      let (_, query) = page.split_once('?').unwrap();
+      Some(query.to_string())
+    }
+    _ => None,
   };
 
   Some(Url {
