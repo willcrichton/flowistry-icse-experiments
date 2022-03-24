@@ -7,27 +7,21 @@ use std::{
   time::Instant,
 };
 
+#[derive(Debug, Clone)]
 struct PositionalArg {
   name: String,
 }
 
+#[derive(Debug, Clone)]
 struct NamedArg {
   required: bool,
   takes_value: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct Cli {
   positional: VecDeque<PositionalArg>,
   named: HashMap<String, NamedArg>,
-}
-
-enum ErrorType<'a> {
-  MissingBinary,
-  InvalidNamed(&'a str),
-  InvalidPositional(&'a str),
-  MissingNamed,
-  MissingPositional,
-  MissingValue(&'a str),
 }
 
 impl Cli {
@@ -61,61 +55,76 @@ impl Cli {
 
   /// Consume the builder and attempt to parse the input strings into a set of key -> value pairings,
   /// returning an error for inputs that don't match the builder configuration.
-  pub fn parse(mut self, args: Vec<String>) -> Result<HashMap<String, String>, String> {
+  pub fn parse(&self, args: Vec<String>) -> Result<HashMap<String, String>, String> {
+    let mut cli = self.clone();
     let mut args = VecDeque::from(args);
     let mut parsed = HashMap::new();
+    let build_error = |err: ErrorType| err.to_string(self);
     let start = Instant::now();
 
     args
       .pop_front()
-      .ok_or_else(|| self.build_error(ErrorType::MissingBinary))?;
+      .ok_or_else(|| build_error(ErrorType::MissingBinary))?;
 
     while !args.is_empty() {
       let arg = args.pop_front().unwrap();
       match arg.split_once("--") {
         Some((_, flag)) => {
-          let named_arg = self
+          let named_arg = cli
             .named
             .remove(flag)
-            .ok_or_else(|| self.build_error(ErrorType::InvalidNamed(flag)))?;
+            .ok_or_else(|| build_error(ErrorType::InvalidNamed(flag)))?;
 
-          let value = match (named_arg.takes_value, args.pop_front()) {
-            (true, Some(val)) => val,
-            (false, _) => "".to_string(),
-            _ => {
-              return Err(self.build_error(ErrorType::MissingValue(flag)));
-            }
+          let value = if named_arg.takes_value {
+            args
+              .pop_front()
+              .ok_or_else(|| build_error(ErrorType::MissingValue(flag)))?
+          } else {
+            "".to_string()
           };
 
           parsed.insert(flag.to_string(), value);
         }
         None => {
-          let pos_arg = self
+          let pos_arg = cli
             .positional
             .pop_front()
-            .ok_or_else(|| self.build_error(ErrorType::InvalidPositional(&arg)))?;
+            .ok_or_else(|| build_error(ErrorType::InvalidPositional(&arg)))?;
 
           parsed.insert(pos_arg.name, arg);
         }
       }
     }
 
-    if !self.positional.is_empty() {
-      return Err(self.build_error(ErrorType::MissingPositional));
+    if !cli.positional.is_empty() {
+      return Err(build_error(ErrorType::MissingPositional));
     }
 
-    if self.named.values().any(|arg| arg.required) {
-      return Err(self.build_error(ErrorType::MissingNamed));
+    if cli.named.values().any(|arg| arg.required) {
+      return Err(build_error(ErrorType::MissingNamed));
     }
 
     log::info!("Executed parse in {}s.", start.elapsed().as_secs());
 
     Ok(parsed)
   }
+}
 
-  /// Build a user-interpretable error for a given cause.
-  fn build_error(&self, error_type: ErrorType) -> String {
-    let cause = match &error_type {
+#[derive(Debug)]
+enum ErrorType<'a> {
+  MissingBinary,
+  InvalidNamed(&'a str),
+  InvalidPositional(&'a str),
+  MissingNamed,
+  MissingPositional,
+  MissingValue(&'a str),
+}
+
+impl<'a> ErrorType<'a> {
+  /// Build a user-interpretable error for a given cause, and include context
+  /// as appropriate.
+  fn to_string(&self, cli: &Cli) -> String {
+    let cause = match self {
       ErrorType::MissingBinary => "Missing binary".to_string(),
 
       ErrorType::InvalidNamed(name) => format!("Invalid named argument \"{name}\""),
@@ -125,16 +134,16 @@ impl Cli {
       ErrorType::MissingPositional | ErrorType::MissingNamed => {
         let mut buf = String::new();
 
-        let (kind, args) = match &error_type {
+        let (kind, args) = match self {
           ErrorType::MissingPositional => (
             "positional",
-            self
+            cli
               .positional
               .iter()
               .map(|arg| &arg.name)
               .collect::<Vec<_>>(),
           ),
-          ErrorType::MissingNamed => ("named", self.named.keys().collect::<Vec<_>>()),
+          ErrorType::MissingNamed => ("named", cli.named.keys().collect::<Vec<_>>()),
           _ => unreachable!(),
         };
 
@@ -154,19 +163,22 @@ impl Cli {
     };
 
     let mut context = String::new();
-    if !self.positional.is_empty() {
+    if !cli.positional.is_empty() {
       context.push_str("Still waiting on positional args:\n");
-      for arg in &self.positional {
+      for arg in &cli.positional {
         context.push_str(&format!("- {}\n", arg.name));
       }
     }
 
-    if !self.named.is_empty() {
+    let required_named = cli
+      .named
+      .iter()
+      .filter(|(_, arg)| arg.required)
+      .collect::<Vec<_>>();
+    if !required_named.is_empty() {
       context.push_str("Still waiting on named args:\n");
-      for (name, arg) in &self.named {
-        if arg.required {
-          context.push_str(&format!("- {name}\n"));
-        }
+      for (name, _) in required_named {
+        context.push_str(&format!("- {name}\n"));
       }
     }
 
@@ -187,30 +199,27 @@ mod test {
     st.to_string()
   }
 
+  fn cli() -> Cli {
+    Cli::new()
+      .positional("file")
+      .named("verbose", false, false)
+      .named("output-format", false, true)
+  }
+
   #[test]
   fn cli_test1() {
-    let cli = Cli::new()
-      .positional("file")
-      .named("output-format", false, true);
-
     let args = vec![s("my-app"), s("--output-format"), s("json"), s("foo.rs")];
-
     assert_eq!(
       Ok(hashmap! {
         s("output-format") => s("json"),
         s("file") => s("foo.rs")
       }),
-      cli.parse(args)
+      cli().parse(args)
     );
   }
 
   #[test]
   fn cli_test2() {
-    let cli = Cli::new()
-      .positional("file")
-      .named("verbose", false, false)
-      .named("output-format", true, true);
-
     let args = vec![
       s("my-app"),
       s("--verbose"),
@@ -226,7 +235,7 @@ Still waiting on named args:
 "#
         .into()
       ),
-      cli.parse(args)
+      cli().parse(args)
     );
   }
 }

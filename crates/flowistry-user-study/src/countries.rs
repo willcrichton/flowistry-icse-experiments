@@ -1,4 +1,4 @@
-//! A tabular data processing program. See the doc comment for details.
+//! A tabular data processing program. See the doc comment below for details.
 
 use std::collections::{BTreeMap, BTreeSet};
 
