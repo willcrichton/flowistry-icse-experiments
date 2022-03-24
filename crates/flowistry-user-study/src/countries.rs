@@ -7,11 +7,11 @@ pub struct Country {
   name: String,
   continent: String,
   population: usize,
-  exports: Vec<String>,
+  exports: BTreeSet<String>,
 }
 
 /// For each continent, and for countries that have the given export,
-/// returns the median population and name of countries at the median.
+/// returns the median population and the name of countries forming the median.
 ///
 /// For an odd number of elements, the median is the middle value.
 /// For an even number of elements, the median is the average of the two middle values.
@@ -63,37 +63,37 @@ fn median_test1() {
       name: s("USA"),
       population: 328,
       continent: s("North America"),
-      exports: vec![s("cheese"), s("wheat")],
+      exports: btreeset![s("cheese"), s("wheat")],
     },
     Country {
       name: s("Canada"),
       population: 37,
       continent: s("North America"),
-      exports: vec![s("poutine"), s("wheat")],
+      exports: btreeset![s("poutine"), s("wheat")],
     },
     Country {
       name: s("Mexico"),
       population: 128,
       continent: s("North America"),
-      exports: vec![s("steel"), s("wheat")],
+      exports: btreeset![s("steel"), s("wheat")],
     },
     Country {
       name: s("Costa Rica"),
       population: 5,
       continent: s("North America"),
-      exports: vec![s("coffee"), s("bananas")],
+      exports: btreeset![s("coffee"), s("bananas")],
     },
     Country {
       name: s("Tanzania"),
       population: 59,
       continent: s("Africa"),
-      exports: vec![s("gold"), s("wheat")],
+      exports: btreeset![s("gold"), s("wheat")],
     },
     Country {
       name: s("Liberia"),
       population: 5,
       continent: s("Africa"),
-      exports: vec![s("rubber"), s("wheat")],
+      exports: btreeset![s("rubber"), s("wheat")],
     },
   ];
 

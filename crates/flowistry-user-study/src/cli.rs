@@ -18,7 +18,7 @@ struct NamedArg {
   takes_value: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Cli {
   positional: VecDeque<PositionalArg>,
   named: HashMap<String, NamedArg>,
@@ -203,7 +203,7 @@ mod test {
     Cli::new()
       .positional("file")
       .named("verbose", false, false)
-      .named("output-format", false, true)
+      .named("output-format", true, true)
   }
 
   #[test]
@@ -220,6 +220,20 @@ mod test {
 
   #[test]
   fn cli_test2() {
+    let args = vec![s("my-app")];
+    assert_eq!(
+      Err(s(r#"Missing positional arguments: file
+Still waiting on positional args:
+- file
+Still waiting on named args:
+- output-format
+"#)),
+      cli().parse(args)
+    );
+  }
+
+  #[test]
+  fn cli_test3() {
     let args = vec![
       s("my-app"),
       s("--verbose"),
