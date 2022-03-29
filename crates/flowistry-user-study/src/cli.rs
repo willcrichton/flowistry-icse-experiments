@@ -53,7 +53,7 @@ impl Cli {
     self
   }
 
-  /// Consume the builder and attempt to parse the input strings into a set of key -> value pairings,
+  /// Attempt to parse the input strings into a set of key -> value pairings,
   /// returning an error for inputs that don't match the builder configuration.
   pub fn parse(&self, args: Vec<String>) -> Result<HashMap<String, String>, String> {
     let mut cli = self.clone();

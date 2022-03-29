@@ -31,7 +31,7 @@ impl Person {
     name.replace_range(
       0..first.len_utf8(),
       &first.to_uppercase().collect::<String>(),
-    );
+    );    
 
     let location = match location {
       "whf" | "WorkingFromHome" => Location::WorkingFromHome,
