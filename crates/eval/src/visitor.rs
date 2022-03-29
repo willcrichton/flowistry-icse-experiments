@@ -1,8 +1,7 @@
 use std::{env, time::Instant};
 
-use either::Either;
+
 use flowistry::{
-  infoflow::Direction,
   mir::{borrowck_facts, utils::BodyExt},
   range::Range,
 };
@@ -10,10 +9,9 @@ use log::info;
 use rustc_hir::{itemlikevisit::ItemLikeVisitor, BodyId, ImplItemKind, ItemKind};
 use rustc_macros::Encodable;
 use rustc_middle::{
-  mir::{Statement, StatementKind, Terminator, TerminatorKind},
   ty::TyCtxt,
 };
-use rustc_span::Span;
+use rustc_span::{FileName, Span};
 
 pub struct EvalCrateVisitor<'tcx> {
   tcx: TyCtxt<'tcx>,
@@ -24,13 +22,24 @@ pub struct EvalCrateVisitor<'tcx> {
 
 #[derive(Debug, Encodable)]
 pub struct EvalResult {
-  location: String,
-  direction: String,
   function_range: Range,
   function_path: String,
+  range: Range,
   num_instructions: usize,
-  num_relevant_instructions: usize,
+  num_tokens: usize,
+  num_relevant_tokens: usize,
   duration: f64,
+}
+
+struct Tokens;
+
+impl Tokens {
+  pub fn build(tcx: TyCtxt<'tcx>, span: Span) -> Self {
+    let source_map = tcx.sess.source_map();
+    let snippet = source_map.span_to_snippet(span).unwrap();
+    rustc_parse::new_parser_from_source_str(&tcx.sess.parse_sess, FileName::Anon(0), snippet);
+    todo!()
+  }
 }
 
 impl EvalCrateVisitor<'tcx> {
@@ -81,75 +90,30 @@ impl EvalCrateVisitor<'tcx> {
 
     let body_with_facts = borrowck_facts::get_body_with_borrowck_facts(tcx, local_def_id);
     let body = &body_with_facts.body;
-
     let num_instructions = body.all_locations().count();
+    let num_tokens = 0;
 
     let start = Instant::now();
-    let results = flowistry::infoflow::compute_flow(tcx, *body_id, &body_with_facts);
+    let focus = flowistry_ide::focus::focus(tcx, *body_id).unwrap();
     let duration = start.elapsed().as_secs_f64();
 
-    let targets = body
-      .all_locations()
-      .filter_map(|location| match body.stmt_at(location) {
-        Either::Left(Statement {
-          kind: StatementKind::Assign(box (lhs, _)),
-          ..
-        })
-        | Either::Right(Terminator {
-          kind:
-            TerminatorKind::Call {
-              destination: Some((lhs, _)),
-              ..
-            },
-          ..
-        }) => Some(vec![(*lhs, location)]),
-        _ => None,
-      })
-      .collect::<Vec<_>>();
-
-    let eval_results = [Direction::Forward, Direction::Backward, Direction::Both]
-      .iter()
-      .flat_map(|direction| {
-        let deps = flowistry::infoflow::compute_dependencies(
-          &results,
-          targets.clone(),
-          *direction,
-        );
-
-        targets
-          .iter()
-          .zip(deps.into_iter())
-          .map(|(target, deps)| {
-            EvalResult {
-              // function-level data
-              function_range: function_range.clone(),
-              function_path: function_path.clone(),
-              num_instructions,
-              //
-              // sample-level parameters
-              location: format!("{:?}", target[0].1),
-              direction: (match direction {
-                Direction::Forward => "forward",
-                Direction::Backward => "backward",
-                Direction::Both => "both",
-              })
-              .into(),
-              //
-              // sample-level data
-              num_relevant_instructions: deps
-                .iter()
-                .filter(|location| {
-                  results
-                    .analysis
-                    .location_domain()
-                    .location_to_local(**location)
-                    .is_none()
-                })
-                .count(),
-              duration,
-            }
-          })
-          .collect::<Vec<_>>()
+    let eval_results = focus.place_info.into_iter()
+      .map(|place_info| {
+        let num_relevant_tokens = 0;
+        EvalResult {
+          // function-level data
+          function_range: function_range.clone(),
+          function_path: function_path.clone(),
+          num_instructions,
+          num_tokens,
+          //
+          // sample-level parameters
+          range: place_info.range,
+          //
+          // sample-level data
+          num_relevant_tokens,
+          duration,
+        }
       });
 
     self.eval_results.extend(eval_results);

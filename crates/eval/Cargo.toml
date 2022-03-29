@@ -15,6 +15,7 @@ itertools = "0.10"
 log = "0.4"
 fluid-let = "1.0"
 flowistry = {path = "../flowistry/crates/flowistry"}
+flowistry_ide = {path = "../flowistry/crates/flowistry_ide"}
 
 [profile.release]
 debug = true
