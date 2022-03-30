@@ -1,17 +1,18 @@
 use std::{env, time::Instant};
 
-
 use flowistry::{
   mir::{borrowck_facts, utils::BodyExt},
-  range::Range,
+  source_map::{Range, SpanTree, ToSpan},
 };
 use log::info;
+use rustc_ast::{
+  token::Token,
+  tokenstream::{TokenStream, TokenTree},
+};
 use rustc_hir::{itemlikevisit::ItemLikeVisitor, BodyId, ImplItemKind, ItemKind};
 use rustc_macros::Encodable;
-use rustc_middle::{
-  ty::TyCtxt,
-};
-use rustc_span::{FileName, Span};
+use rustc_middle::ty::TyCtxt;
+use rustc_span::{source_map::Spanned, FileName, Span};
 
 pub struct EvalCrateVisitor<'tcx> {
   tcx: TyCtxt<'tcx>,
@@ -31,14 +32,44 @@ pub struct EvalResult {
   duration: f64,
 }
 
-struct Tokens;
+struct Tokens {
+  spans: SpanTree<()>,
+}
 
 impl Tokens {
-  pub fn build(tcx: TyCtxt<'tcx>, span: Span) -> Self {
+  fn flatten_stream(stream: TokenStream) -> Vec<Token> {
+    stream
+      .into_trees()
+      .flat_map(|tree| match tree {
+        TokenTree::Token(token) => vec![token],
+        TokenTree::Delimited(_, _, stream) => Self::flatten_stream(stream),
+      })
+      .collect()
+  }
+
+  pub fn build(tcx: TyCtxt<'_>, span: Span) -> Self {
     let source_map = tcx.sess.source_map();
     let snippet = source_map.span_to_snippet(span).unwrap();
-    rustc_parse::new_parser_from_source_str(&tcx.sess.parse_sess, FileName::Anon(0), snippet);
-    todo!()
+    let mut parser = rustc_parse::new_parser_from_source_str(
+      &tcx.sess.parse_sess,
+      FileName::Anon(0),
+      snippet,
+    );
+    let token_stream = parser.parse_tokens();
+    let tokens = Self::flatten_stream(token_stream);
+    let spans = SpanTree::new(tokens.into_iter().map(|token| Spanned {
+      span: token.span,
+      node: (),
+    }));
+    Tokens { spans }
+  }
+
+  pub fn total_tokens(&self) -> usize {
+    self.spans.len()
+  }
+
+  pub fn count_tokens_overlapping(&self, span: Span) -> usize {
+    self.spans.overlapping(span.data()).count()
   }
 }
 
@@ -64,18 +95,6 @@ impl EvalCrateVisitor<'tcx> {
       return;
     }
 
-    let count = {
-      self.count += 1;
-      self.count
-    };
-
-    let only_run = env::var("ONLY_RUN");
-    if let Ok(n) = only_run {
-      if count < n.parse::<usize>().unwrap() {
-        return;
-      }
-    }
-
     let function_range = &match Range::from_span(body_span, source_map) {
       Ok(range) => range,
       Err(_) => {
@@ -83,40 +102,72 @@ impl EvalCrateVisitor<'tcx> {
       }
     };
 
+    self.count += 1;
+
     let local_def_id = tcx.hir().body_owner_def_id(*body_id);
     let def_id = local_def_id.to_def_id();
     let function_path = &tcx.def_path_debug_str(def_id);
-    info!("Visiting {} ({} / {})", function_path, count, self.total);
 
+    let only_run = env::var("ONLY_RUN");
+    if let Ok(n) = only_run {
+      let skip = match n.parse::<usize>() {
+        Ok(n) => self.count != n,
+        Err(_) => function_path != &n,
+      };
+      if skip {
+        return;
+      }
+    }
+
+    info!(
+      "Visiting {} ({} / {})",
+      function_path, self.count, self.total
+    );
+
+    let start = Instant::now();
     let body_with_facts = borrowck_facts::get_body_with_borrowck_facts(tcx, local_def_id);
+    let facts_duration = start.elapsed().as_secs_f64();
     let body = &body_with_facts.body;
     let num_instructions = body.all_locations().count();
-    let num_tokens = 0;
+
+    let body_span = tcx.hir().body(*body_id).value.span;
+    let start = Instant::now();
+    let tokens = Tokens::build(tcx, body_span);
+    let build_duration = start.elapsed().as_secs_f64();
+    let num_tokens = tokens.total_tokens();
 
     let start = Instant::now();
     let focus = flowistry_ide::focus::focus(tcx, *body_id).unwrap();
     let duration = start.elapsed().as_secs_f64();
 
-    let eval_results = focus.place_info.into_iter()
-      .map(|place_info| {
-        let num_relevant_tokens = 0;
-        EvalResult {
-          // function-level data
-          function_range: function_range.clone(),
-          function_path: function_path.clone(),
-          num_instructions,
-          num_tokens,
-          //
-          // sample-level parameters
-          range: place_info.range,
-          //
-          // sample-level data
-          num_relevant_tokens,
-          duration,
-        }
-      });
+    let start = Instant::now();
+    let eval_results = focus.place_info.into_iter().map(|place_info| {
+      let spans = place_info
+        .slice
+        .into_iter()
+        .map(|range| range.to_span(tcx).unwrap());
+      let num_relevant_tokens = spans
+        .map(|span| tokens.count_tokens_overlapping(span))
+        .sum::<usize>();
+      EvalResult {
+        // function-level data
+        function_range: function_range.clone(),
+        function_path: function_path.clone(),
+        num_instructions,
+        num_tokens,
+        //
+        // sample-level parameters
+        range: place_info.range,
+        //
+        // sample-level data
+        num_relevant_tokens,
+        duration,
+      }
+    });
 
     self.eval_results.extend(eval_results);
+    let output_duration = start.elapsed().as_secs_f64();
+    info!("facts={facts_duration:.3} build={build_duration:.3} analyze={duration:.3} output={output_duration:.3}");
   }
 }
 

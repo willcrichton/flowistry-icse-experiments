@@ -15,8 +15,9 @@ extern crate rustc_span;
 
 mod visitor;
 
-use flowistry::mir::borrowck_facts;
 use std::{env, fs};
+
+use flowistry::mir::borrowck_facts;
 
 struct Callbacks {
   output_path: String,

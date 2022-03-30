@@ -12,7 +12,7 @@ fn main() {
     "rustc",
     "--profile",
     "check",
-    "--locked",
+    "-v", // "--locked",
   ]);
   cmd.args(&env::args().skip(2).collect::<Vec<_>>());
   cmd.args(&["--", "--flowistry-eval"]);
