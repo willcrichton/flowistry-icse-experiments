@@ -9,10 +9,11 @@ use rustc_ast::{
   token::Token,
   tokenstream::{TokenStream, TokenTree},
 };
+use rustc_data_structures::fx::FxHashSet as HashSet;
 use rustc_hir::{itemlikevisit::ItemLikeVisitor, BodyId, ImplItemKind, ItemKind};
 use rustc_macros::Encodable;
 use rustc_middle::ty::TyCtxt;
-use rustc_span::{source_map::Spanned, FileName, Span};
+use rustc_span::{source_map::Spanned, FileName, Span, SyntaxContext};
 
 pub struct EvalCrateVisitor<'tcx> {
   tcx: TyCtxt<'tcx>,
@@ -47,19 +48,32 @@ impl Tokens {
       .collect()
   }
 
-  pub fn build(tcx: TyCtxt<'_>, span: Span) -> Self {
+  pub fn build(tcx: TyCtxt<'_>, span: Span, count: usize) -> Self {
+    log::debug!("Tokens: {span:?}");
     let source_map = tcx.sess.source_map();
     let snippet = source_map.span_to_snippet(span).unwrap();
+    log::debug!("{snippet}");
+
+    let base = span.lo();
     let mut parser = rustc_parse::new_parser_from_source_str(
       &tcx.sess.parse_sess,
-      FileName::Anon(0),
+      FileName::Anon(count as u64),
       snippet,
     );
+
     let token_stream = parser.parse_tokens();
     let tokens = Self::flatten_stream(token_stream);
-    let spans = SpanTree::new(tokens.into_iter().map(|token| Spanned {
-      span: token.span,
-      node: (),
+    log::debug!(
+      "{:?}",
+      tokens.iter().map(|token| &token.kind).collect::<Vec<_>>()
+    );
+
+    let spans = SpanTree::new(tokens.into_iter().map(|token| {
+      let lo = source_map.lookup_byte_offset(token.span.lo()).pos;
+      let hi = source_map.lookup_byte_offset(token.span.hi()).pos;
+      let span = Span::new(base + lo, base + hi, SyntaxContext::root(), None);
+      log::debug!("{span:?}");
+      Spanned { span, node: () }
     }));
     Tokens { spans }
   }
@@ -68,8 +82,12 @@ impl Tokens {
     self.spans.len()
   }
 
-  pub fn count_tokens_overlapping(&self, span: Span) -> usize {
-    self.spans.overlapping(span.data()).count()
+  pub fn count_tokens_overlapping(&self, spans: impl IntoIterator<Item = Span>) -> usize {
+    let all_tokens = spans
+      .into_iter()
+      .flat_map(|span| self.spans.overlapping(span.data()))
+      .collect::<HashSet<_>>();
+    all_tokens.len()
   }
 }
 
@@ -132,7 +150,7 @@ impl EvalCrateVisitor<'tcx> {
 
     let body_span = tcx.hir().body(*body_id).value.span;
     let start = Instant::now();
-    let tokens = Tokens::build(tcx, body_span);
+    let tokens = Tokens::build(tcx, body_span, self.count);
     let build_duration = start.elapsed().as_secs_f64();
     let num_tokens = tokens.total_tokens();
 
@@ -146,9 +164,7 @@ impl EvalCrateVisitor<'tcx> {
         .slice
         .into_iter()
         .map(|range| range.to_span(tcx).unwrap());
-      let num_relevant_tokens = spans
-        .map(|span| tokens.count_tokens_overlapping(span))
-        .sum::<usize>();
+      let num_relevant_tokens = tokens.count_tokens_overlapping(spans);
       EvalResult {
         // function-level data
         function_range: function_range.clone(),
