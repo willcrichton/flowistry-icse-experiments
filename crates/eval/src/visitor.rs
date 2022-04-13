@@ -1,4 +1,4 @@
-use std::{env, time::Instant};
+use std::{env, iter::FromIterator, time::Instant};
 
 use flowistry::{
   mir::{borrowck_facts, utils::BodyExt},
@@ -13,7 +13,7 @@ use rustc_data_structures::fx::FxHashSet as HashSet;
 use rustc_hir::{itemlikevisit::ItemLikeVisitor, BodyId, ImplItemKind, ItemKind};
 use rustc_macros::Encodable;
 use rustc_middle::ty::TyCtxt;
-use rustc_span::{source_map::Spanned, FileName, Span, SyntaxContext};
+use rustc_span::{source_map::Spanned, FileName, Span, SpanData, SyntaxContext};
 
 pub struct EvalCrateVisitor<'tcx> {
   tcx: TyCtxt<'tcx>,
@@ -23,18 +23,29 @@ pub struct EvalCrateVisitor<'tcx> {
 }
 
 #[derive(Debug, Encodable)]
+pub enum EvalDirection {
+  Forward,
+  Backward,
+  Both,
+}
+
+#[derive(Debug, Encodable)]
 pub struct EvalResult {
   function_range: Range,
   function_path: String,
   range: Range,
   num_instructions: usize,
   num_tokens: usize,
+  num_lines: usize,
+  direction: EvalDirection,
   num_relevant_tokens: usize,
+  num_relevant_lines: usize,
+  line_iqr: usize,
   duration: f64,
 }
 
 struct Tokens {
-  spans: SpanTree<()>,
+  spans: SpanTree<usize>,
 }
 
 impl Tokens {
@@ -68,12 +79,12 @@ impl Tokens {
       tokens.iter().map(|token| &token.kind).collect::<Vec<_>>()
     );
 
-    let spans = SpanTree::new(tokens.into_iter().map(|token| {
+    let spans = SpanTree::new(tokens.into_iter().enumerate().map(|(idx, token)| {
       let lo = source_map.lookup_byte_offset(token.span.lo()).pos;
       let hi = source_map.lookup_byte_offset(token.span.hi()).pos;
       let span = Span::new(base + lo, base + hi, SyntaxContext::root(), None);
       log::debug!("{span:?}");
-      Spanned { span, node: () }
+      Spanned { span, node: idx }
     }));
     Tokens { spans }
   }
@@ -82,12 +93,14 @@ impl Tokens {
     self.spans.len()
   }
 
-  pub fn count_tokens_overlapping(&self, spans: impl IntoIterator<Item = Span>) -> usize {
-    let all_tokens = spans
+  pub fn query(
+    &self,
+    spans: impl IntoIterator<Item = Span>,
+  ) -> HashSet<&(SpanData, usize)> {
+    spans
       .into_iter()
       .flat_map(|span| self.spans.overlapping(span.data()))
-      .collect::<HashSet<_>>();
-    all_tokens.len()
+      .collect::<HashSet<_>>()
   }
 }
 
@@ -154,31 +167,84 @@ impl EvalCrateVisitor<'tcx> {
     let build_duration = start.elapsed().as_secs_f64();
     let num_tokens = tokens.total_tokens();
 
+    let span_lines = |sp: Span| {
+      let lines = source_map.span_to_lines(sp).unwrap().lines;
+      lines.first().unwrap().line_index ..= lines.last().unwrap().line_index
+    };
+
+    let mut body_lines = tokens
+      .spans
+      .spans()
+      .flat_map(|span| span_lines(span.span()))
+      .collect::<Vec<_>>();
+    body_lines.dedup();
+    body_lines.sort();
+    let num_lines = body_lines.len();
+
     let start = Instant::now();
     let focus = flowistry_ide::focus::focus(tcx, *body_id).unwrap();
     let duration = start.elapsed().as_secs_f64();
 
     let start = Instant::now();
-    let eval_results = focus.place_info.into_iter().map(|place_info| {
-      let spans = place_info
-        .slice
-        .into_iter()
-        .map(|range| range.to_span(tcx).unwrap());
-      let num_relevant_tokens = tokens.count_tokens_overlapping(spans);
-      EvalResult {
-        // function-level data
-        function_range: function_range.clone(),
-        function_path: function_path.clone(),
-        num_instructions,
-        num_tokens,
-        //
-        // sample-level parameters
-        range: place_info.range,
-        //
-        // sample-level data
-        num_relevant_tokens,
-        duration,
-      }
+    let eval_results = focus.place_info.into_iter().flat_map(|place_info| {
+      [
+        EvalDirection::Forward,
+        EvalDirection::Backward,
+        EvalDirection::Both,
+      ]
+      .into_iter()
+      .map(|direction| {
+        let slice: Box<dyn Iterator<Item = _>> = match direction {
+          EvalDirection::Both => {
+            Box::new(place_info.forward.iter().chain(place_info.backward.iter()))
+          }
+          EvalDirection::Forward => Box::new(place_info.forward.iter()),
+          EvalDirection::Backward => Box::new(place_info.backward.iter()),
+        };
+        let spans = slice.map(|range| range.to_span(tcx).unwrap());
+
+        let mut relevant_tokens = Vec::from_iter(tokens.query(spans));
+        relevant_tokens.sort_by_key(|(_, idx)| *idx);
+        let num_relevant_tokens = relevant_tokens.len();
+
+        let mut relevant_lines = relevant_tokens
+          .iter()
+          .flat_map(|(span, _)| span_lines(span.span()))
+          .collect::<Vec<_>>();
+        relevant_lines.dedup();
+        relevant_lines.sort();
+
+        let num_relevant_lines = relevant_lines.len();
+
+        let n = num_relevant_lines;
+        let line_iqr = if n > 0 {
+          let lo = relevant_lines[n * 1 / 4];
+          let hi = relevant_lines[n * 3 / 4];
+          body_lines.iter().filter(|i| lo <= **i && **i <= hi).count()
+        } else {
+          0
+        };
+
+        EvalResult {
+          // function-level data
+          function_range: function_range.clone(),
+          function_path: function_path.clone(),
+          num_instructions,
+          num_tokens,
+          num_lines,
+          //
+          // sample-level parameters
+          range: place_info.range.clone(),
+          direction,
+          //
+          // sample-level data
+          num_relevant_tokens,
+          num_relevant_lines,
+          line_iqr,
+          duration,
+        }
+      })
+      .collect::<Vec<_>>()
     });
 
     self.eval_results.extend(eval_results);

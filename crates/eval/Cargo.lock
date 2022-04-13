@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "flowistry"
-version = "0.5.18"
+version = "0.5.19"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "flowistry_ide"
-version = "0.5.18"
+version = "0.5.19"
 dependencies = [
  "anyhow",
  "cargo_metadata",
