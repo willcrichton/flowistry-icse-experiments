@@ -1,6 +1,7 @@
 use std::{env, iter::FromIterator, time::Instant};
 
 use flowistry::{
+  infoflow::Direction,
   mir::{borrowck_facts, utils::BodyExt},
   source_map::{Range, SpanTree, ToSpan},
 };
@@ -10,26 +11,12 @@ use rustc_ast::{
   tokenstream::{TokenStream, TokenTree},
 };
 use rustc_data_structures::fx::FxHashSet as HashSet;
-use rustc_hir::{itemlikevisit::ItemLikeVisitor, BodyId, ImplItemKind, ItemKind};
-use rustc_macros::Encodable;
-use rustc_middle::ty::TyCtxt;
+use rustc_hir::{intravisit::Visitor, BodyId, ImplItemKind, ItemKind};
+use rustc_middle::{hir::nested_filter::OnlyBodies, ty::TyCtxt};
 use rustc_span::{source_map::Spanned, FileName, Span, SpanData, SyntaxContext};
+use serde::Serialize;
 
-pub struct EvalCrateVisitor<'tcx> {
-  tcx: TyCtxt<'tcx>,
-  count: usize,
-  total: usize,
-  pub eval_results: Vec<EvalResult>,
-}
-
-#[derive(Debug, Encodable)]
-pub enum EvalDirection {
-  Forward,
-  Backward,
-  Both,
-}
-
-#[derive(Debug, Encodable)]
+#[derive(Debug, Serialize)]
 pub struct EvalResult {
   function_range: Range,
   function_path: String,
@@ -37,7 +24,7 @@ pub struct EvalResult {
   num_instructions: usize,
   num_tokens: usize,
   num_lines: usize,
-  direction: EvalDirection,
+  direction: Direction,
   num_relevant_tokens: usize,
   num_relevant_lines: usize,
   line_iqr: usize,
@@ -104,22 +91,61 @@ impl Tokens {
   }
 }
 
-impl EvalCrateVisitor<'tcx> {
-  pub fn new(tcx: TyCtxt<'tcx>, total: usize) -> Self {
-    EvalCrateVisitor {
-      tcx,
-      count: 0,
-      total,
-      eval_results: Vec::new(),
-    }
+pub trait BodyVisitor<'tcx> {
+  fn visit(&mut self, body_span: Span, body_id: BodyId, tcx: TyCtxt<'tcx>);
+}
+
+struct BodyFinder<'tcx, 'a, V> {
+  pub tcx: TyCtxt<'tcx>,
+  pub visitor: &'a mut V,
+}
+
+impl<'tcx, V> Visitor<'tcx> for BodyFinder<'tcx, '_, V>
+where
+  V: BodyVisitor<'tcx>,
+{
+  type NestedFilter = OnlyBodies;
+
+  fn nested_visit_map(&mut self) -> Self::Map {
+    self.tcx.hir()
   }
 
-  fn analyze(&mut self, body_span: Span, body_id: &BodyId) {
+  fn visit_nested_body(&mut self, id: BodyId) {
+    let hir = self.nested_visit_map();
+
+    // const/static items are considered to have bodies, so we want to exclude
+    // them from our search for functions
+    if !hir
+      .body_owner_kind(hir.body_owner_def_id(id))
+      .is_fn_or_closure()
+    {
+      return;
+    }
+
+    let owner = hir.body_owner(id);
+    let body_span = hir.span(owner);
     if body_span.from_expansion() {
       return;
     }
 
-    let tcx = self.tcx;
+    self.visitor.visit(body_span, id, self.tcx);
+  }
+}
+
+pub fn visit_bodies<'tcx, V: BodyVisitor<'tcx>>(tcx: TyCtxt<'tcx>, visitor: &mut V) {
+  tcx
+    .hir()
+    .deep_visit_all_item_likes(&mut BodyFinder { tcx, visitor });
+}
+
+pub struct EvalCrateVisitor {
+  count: usize,
+  total: usize,
+  pub eval_results: Vec<EvalResult>,
+}
+
+impl BodyVisitor<'_> for EvalCrateVisitor {
+  fn visit(&mut self, body_span: Span, body_id: BodyId, tcx: TyCtxt) {
     let source_map = tcx.sess.source_map();
     let source_file = &source_map.lookup_source_file(body_span.lo());
     if source_file.src.is_none() {
@@ -135,7 +161,7 @@ impl EvalCrateVisitor<'tcx> {
 
     self.count += 1;
 
-    let local_def_id = tcx.hir().body_owner_def_id(*body_id);
+    let local_def_id = tcx.hir().body_owner_def_id(body_id);
     let def_id = local_def_id.to_def_id();
     let function_path = &tcx.def_path_debug_str(def_id);
 
@@ -161,7 +187,7 @@ impl EvalCrateVisitor<'tcx> {
     let body = &body_with_facts.body;
     let num_instructions = body.all_locations().count();
 
-    let body_span = tcx.hir().body(*body_id).value.span;
+    let body_span = tcx.hir().body(body_id).value.span;
     let start = Instant::now();
     let tokens = Tokens::build(tcx, body_span, self.count);
     let build_duration = start.elapsed().as_secs_f64();
@@ -182,69 +208,64 @@ impl EvalCrateVisitor<'tcx> {
     let num_lines = body_lines.len();
 
     let start = Instant::now();
-    let focus = flowistry_ide::focus::focus(tcx, *body_id).unwrap();
+    fluid_let::fluid_set!(flowistry_ide::FOCUS_DEBUG, true);
+    let focus = flowistry_ide::focus(tcx, body_id).unwrap();
     let duration = start.elapsed().as_secs_f64();
 
     let start = Instant::now();
     let eval_results = focus.place_info.into_iter().flat_map(|place_info| {
-      [
-        EvalDirection::Forward,
-        EvalDirection::Backward,
-        EvalDirection::Both,
-      ]
-      .into_iter()
-      .map(|direction| {
-        let slice: Box<dyn Iterator<Item = _>> = match direction {
-          EvalDirection::Both => {
-            Box::new(place_info.forward.iter().chain(place_info.backward.iter()))
+      [Direction::Forward, Direction::Backward, Direction::Both]
+        .into_iter()
+        .map(|direction| {
+          let slice = match direction {
+            Direction::Both => place_info.slice.iter(),
+            Direction::Forward => place_info.forward.as_ref().unwrap().iter(),
+            Direction::Backward => place_info.backward.as_ref().unwrap().iter(),
+          };
+          let spans = slice.map(|range| range.to_span(tcx).unwrap());
+
+          let mut relevant_tokens = Vec::from_iter(tokens.query(spans));
+          relevant_tokens.sort_by_key(|(_, idx)| *idx);
+          let num_relevant_tokens = relevant_tokens.len();
+
+          let mut relevant_lines = relevant_tokens
+            .iter()
+            .flat_map(|(span, _)| span_lines(span.span()))
+            .collect::<Vec<_>>();
+          relevant_lines.dedup();
+          relevant_lines.sort();
+
+          let num_relevant_lines = relevant_lines.len();
+
+          let n = num_relevant_lines;
+          let line_iqr = if n > 0 {
+            let lo = relevant_lines[n * 1 / 4];
+            let hi = relevant_lines[n * 3 / 4];
+            body_lines.iter().filter(|i| lo <= **i && **i <= hi).count()
+          } else {
+            0
+          };
+
+          EvalResult {
+            // function-level data
+            function_range: function_range.clone(),
+            function_path: function_path.clone(),
+            num_instructions,
+            num_tokens,
+            num_lines,
+            //
+            // sample-level parameters
+            range: place_info.range.clone(),
+            direction,
+            //
+            // sample-level data
+            num_relevant_tokens,
+            num_relevant_lines,
+            line_iqr,
+            duration,
           }
-          EvalDirection::Forward => Box::new(place_info.forward.iter()),
-          EvalDirection::Backward => Box::new(place_info.backward.iter()),
-        };
-        let spans = slice.map(|range| range.to_span(tcx).unwrap());
-
-        let mut relevant_tokens = Vec::from_iter(tokens.query(spans));
-        relevant_tokens.sort_by_key(|(_, idx)| *idx);
-        let num_relevant_tokens = relevant_tokens.len();
-
-        let mut relevant_lines = relevant_tokens
-          .iter()
-          .flat_map(|(span, _)| span_lines(span.span()))
-          .collect::<Vec<_>>();
-        relevant_lines.dedup();
-        relevant_lines.sort();
-
-        let num_relevant_lines = relevant_lines.len();
-
-        let n = num_relevant_lines;
-        let line_iqr = if n > 0 {
-          let lo = relevant_lines[n * 1 / 4];
-          let hi = relevant_lines[n * 3 / 4];
-          body_lines.iter().filter(|i| lo <= **i && **i <= hi).count()
-        } else {
-          0
-        };
-
-        EvalResult {
-          // function-level data
-          function_range: function_range.clone(),
-          function_path: function_path.clone(),
-          num_instructions,
-          num_tokens,
-          num_lines,
-          //
-          // sample-level parameters
-          range: place_info.range.clone(),
-          direction,
-          //
-          // sample-level data
-          num_relevant_tokens,
-          num_relevant_lines,
-          line_iqr,
-          duration,
-        }
-      })
-      .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
     });
 
     self.eval_results.extend(eval_results);
@@ -253,42 +274,23 @@ impl EvalCrateVisitor<'tcx> {
   }
 }
 
-impl ItemLikeVisitor<'tcx> for EvalCrateVisitor<'tcx> {
-  fn visit_item(&mut self, item: &'tcx rustc_hir::Item<'tcx>) {
-    match &item.kind {
-      ItemKind::Fn(_, _, body_id) => {
-        self.analyze(item.span, body_id);
-      }
-      _ => {}
+impl EvalCrateVisitor {
+  pub fn new(total: usize) -> Self {
+    EvalCrateVisitor {
+      count: 0,
+      total,
+      eval_results: Vec::new(),
     }
   }
-
-  fn visit_impl_item(&mut self, impl_item: &'tcx rustc_hir::ImplItem<'tcx>) {
-    match &impl_item.kind {
-      ImplItemKind::Fn(_, body_id) => {
-        self.analyze(impl_item.span, body_id);
-      }
-      _ => {}
-    }
-  }
-
-  fn visit_trait_item(&mut self, _trait_item: &'tcx rustc_hir::TraitItem<'tcx>) {}
-
-  fn visit_foreign_item(&mut self, _foreign_item: &'tcx rustc_hir::ForeignItem<'tcx>) {}
 }
 
-pub struct ItemCounter<'tcx> {
-  pub tcx: TyCtxt<'tcx>,
+pub struct ItemCounter {
   pub count: usize,
 }
 
-impl ItemCounter<'_> {
-  fn analyze(&mut self, body_span: Span) {
-    if body_span.from_expansion() {
-      return;
-    }
-
-    let source_map = self.tcx.sess.source_map();
+impl BodyVisitor<'_> for ItemCounter {
+  fn visit(&mut self, body_span: Span, body_id: BodyId, tcx: TyCtxt) {
+    let source_map = tcx.sess.source_map();
     let source_file = &source_map.lookup_source_file(body_span.lo());
     if source_file.src.is_none() {
       return;
@@ -296,28 +298,4 @@ impl ItemCounter<'_> {
 
     self.count += 1;
   }
-}
-
-impl ItemLikeVisitor<'tcx> for ItemCounter<'tcx> {
-  fn visit_item(&mut self, item: &'tcx rustc_hir::Item<'tcx>) {
-    match &item.kind {
-      ItemKind::Fn(_, _, _) => {
-        self.analyze(item.span);
-      }
-      _ => {}
-    }
-  }
-
-  fn visit_impl_item(&mut self, impl_item: &'tcx rustc_hir::ImplItem<'tcx>) {
-    match &impl_item.kind {
-      ImplItemKind::Fn(_, _) => {
-        self.analyze(impl_item.span);
-      }
-      _ => {}
-    }
-  }
-
-  fn visit_trait_item(&mut self, _trait_item: &'tcx rustc_hir::TraitItem<'tcx>) {}
-
-  fn visit_foreign_item(&mut self, _foreign_item: &'tcx rustc_hir::ForeignItem<'tcx>) {}
 }

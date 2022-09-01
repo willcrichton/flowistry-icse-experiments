@@ -16,6 +16,8 @@ log = "0.4"
 fluid-let = "1.0"
 flowistry = {path = "../flowistry/crates/flowistry"}
 flowistry_ide = {path = "../flowistry/crates/flowistry_ide"}
+serde = "1"
+serde_json = "1"
 
 [profile.release]
 debug = true

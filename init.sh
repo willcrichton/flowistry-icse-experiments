@@ -23,5 +23,5 @@ co https://github.com/rayon-rs/rayon/ rayon c571f8ffb4f74c8c09b4e1e6d9979b71b441
 co https://github.com/mrDIMAS/rg3d rg3d ca7b85f2b30e45b82caee0591ee1abf65bb3eb00 &&
 co https://github.com/ctz/rustls rustls cdf1dada21a537e141d0c6dde9c5685bb43fbc0e &&
 co https://github.com/mozilla/sccache sccache 3f318a8675e4c3de4f5e8ab2d086189f2ae5f5cf &&
-co https://github.com/RustPython/RustPython RustPython 9143e51b7524a5084d5ed230b1f2f5b0610ac58b
+co https://github.com/RustPython/RustPython RustPython 49016b6a94e3c57bc6e26458f72fcb67191f7da4
 popd

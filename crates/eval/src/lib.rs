@@ -1,4 +1,4 @@
-#![feature(rustc_private, in_band_lifetimes, box_patterns)]
+#![feature(rustc_private, box_patterns)]
 
 extern crate either;
 extern crate rustc_ast;
@@ -35,13 +35,13 @@ impl rustc_driver::Callbacks for Callbacks {
     queries: &'tcx rustc_interface::Queries<'tcx>,
   ) -> rustc_driver::Compilation {
     queries.global_ctxt().unwrap().take().enter(|tcx| {
-      let mut counter = visitor::ItemCounter { count: 0, tcx };
-      tcx.hir().visit_all_item_likes(&mut counter);
+      let mut counter = visitor::ItemCounter { count: 0 };
+      visitor::visit_bodies(tcx, &mut counter);
 
-      let mut eval_visitor = visitor::EvalCrateVisitor::new(tcx, counter.count);
-      tcx.hir().visit_all_item_likes(&mut eval_visitor);
+      let mut eval_visitor = visitor::EvalCrateVisitor::new(counter.count);
+      visitor::visit_bodies(tcx, &mut eval_visitor);
 
-      let json = rustc_serialize::json::encode(&eval_visitor.eval_results).unwrap();
+      let json = serde_json::to_string(&eval_visitor.eval_results).unwrap();
 
       fs::write(&self.output_path, &json).unwrap();
     });
@@ -50,7 +50,7 @@ impl rustc_driver::Callbacks for Callbacks {
   }
 }
 
-pub fn run(args: &[String]) -> Result<(), rustc_errors::ErrorReported> {
+pub fn run(args: &[String]) -> rustc_interface::interface::Result<()> {
   let mut callbacks = Callbacks {
     output_path: env::var("OUTPUT_PATH").unwrap(),
   };
